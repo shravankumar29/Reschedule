@@ -22,7 +22,7 @@ export function LogoMark({ light = false }: { light?: boolean }) {
 }
 
 export function AppShell() {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820)
   const [searchOpen, setSearchOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -72,14 +72,63 @@ export function Button({ children, variant = 'primary', icon, onClick, type = 'b
   return <button type={type} className={`button button-${variant} ${className}`} onClick={onClick} disabled={disabled}>{icon}{children}</button>
 }
 
-export function StatCard({ label, value, detail, icon: Icon, tone = 'teal', trend }: { label: string; value: string; detail: string; icon: ComponentType<{ size?: number }>; tone?: 'teal' | 'amber' | 'brick' | 'blue'; trend?: string }) {
-  return <div className="stat-card"><div className={`stat-icon ${tone}`}><Icon size={18} /></div><div className="stat-card-main"><div className="stat-label">{label}</div><div className="stat-value">{value}</div><div className="stat-detail">{trend && <span className="trend">{trend}</span>}{detail}</div></div></div>
+export function StatCard({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  tone = 'teal',
+  trend,
+  onClick,
+  className = '',
+  badge,
+}: {
+  label: string
+  value: string
+  detail: string
+  icon: ComponentType<{ size?: number }>
+  tone?: 'teal' | 'amber' | 'brick' | 'blue'
+  trend?: string
+  onClick?: () => void
+  className?: string
+  badge?: string
+}) {
+  return (
+    <div
+      className={`stat-card ${onClick ? 'clickable' : ''} ${className}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ' ? onClick() : undefined) : undefined}
+    >
+      <div className={`stat-icon ${tone}`}>
+        <Icon size={18} />
+      </div>
+      <div className="stat-card-main">
+        <div className="stat-label">{label}</div>
+        <div className="stat-value">{value}</div>
+        <div className="stat-detail">
+          {trend && <span className="trend">{trend}</span>}
+          {detail}
+        </div>
+      </div>
+      {badge && <span className="stat-card-badge">{badge}</span>}
+    </div>
+  )
 }
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'teal' }) { return <span className={`badge badge-${tone}`}><span className="badge-dot" />{children}</span> }
 export function PriorityBadge({ value }: { value: Priority }) { return <Badge tone={value === 'High' ? 'danger' : value === 'Medium' ? 'warning' : 'neutral'}>{value}</Badge> }
-export function StatusBadge({ value }: { value: OrderStatus | MachineStatus | TaskStatus | 'Open' | 'Analyzed' | 'Resolved' | 'Critical' | 'Medium' | 'Low' | 'High' }) {
-  const tone = ['Completed', 'Available', 'Resolved'].includes(value) ? 'success' : ['Delayed', 'Breakdown', 'Critical', 'Open'].includes(value) ? 'danger' : ['Running', 'In Production', 'Ongoing', 'Analyzed', 'High'].includes(value) ? 'teal' : ['Under Maintenance', 'Scheduled', 'Rescheduled', 'Medium'].includes(value) ? 'warning' : 'neutral'
+export function StatusBadge({ value }: { value: string }) {
+  const tone = ['Completed', 'Available', 'Resolved', 'Recovered', 'Received'].includes(value)
+    ? 'success'
+    : ['Delayed', 'Breakdown', 'Critical', 'Open', 'Under Breakdown', 'Under Repair'].includes(value)
+    ? 'danger'
+    : ['Awaiting Material', 'Under Maintenance', 'Scheduled Recovery', 'Reported', 'Awaiting Scheduling', 'Scheduled', 'Rescheduled', 'Medium'].includes(value)
+    ? 'warning'
+    : ['Running', 'In Production', 'Ongoing', 'Analyzed', 'High'].includes(value)
+    ? 'teal'
+    : 'neutral'
   return <Badge tone={tone as 'success' | 'warning' | 'danger' | 'teal' | 'neutral'}>{value}</Badge>
 }
 
