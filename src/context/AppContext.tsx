@@ -128,11 +128,16 @@ function loadState(): PersistedState {
 }
 
 function mapBackendOpsToTasks(ops: any[], orders: Order[]): ScheduleTask[] {
+  if (!orders || orders.length === 0) return []
   const jobMap = new Map(orders.map((j) => [j.id, j]))
   const machineLanes: Record<string, number> = {}
 
-  return ops.map((op, idx) => {
-    const order = jobMap.get(op.job_id)
+  // Filter out any operations for jobs that don't exist in active orders
+  const validOps = (ops || []).filter((op) => jobMap.has(op.job_id))
+  if (validOps.length === 0) return []
+
+  return validOps.map((op, idx) => {
+    const order = jobMap.get(op.job_id)!
     const lane = (machineLanes[op.machine_id] || 0) % 2
     machineLanes[op.machine_id] = (machineLanes[op.machine_id] || 0) + 1
 
@@ -491,8 +496,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setMachines(mappedMachines)
         }
 
-        let currentOrders = orders
-        if (backendJobs && backendJobs.length > 0) {
+        let currentOrders: Order[] = []
+        if (backendJobs && Array.isArray(backendJobs)) {
           const mappedOrders: Order[] = backendJobs.map((j) => ({
             id: j.job_id,
             product: j.product_name,
@@ -510,7 +515,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           currentOrders = mappedOrders
         }
 
-        if (backendDisruptions && backendDisruptions.length > 0) {
+        if (backendDisruptions && Array.isArray(backendDisruptions)) {
           const mappedDisruptions: Disruption[] = backendDisruptions.map((d) => ({
             id: d.disruption_id,
             type: d.disruption_type,
@@ -527,9 +532,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Try loading current schedule
         const currentSched = await api.getCurrentSchedule().catch(() => null)
-        if (currentSched && currentSched.operations.length > 0) {
+        if (currentOrders.length === 0) {
+          setSchedule([])
+          setOriginalSchedule([])
+        } else if (currentSched && currentSched.operations && currentSched.operations.length > 0) {
           const tasks = mapBackendOpsToTasks(currentSched.operations, currentOrders)
           setSchedule(tasks)
+          setOriginalSchedule(tasks)
+        } else {
+          setSchedule([])
+          setOriginalSchedule([])
         }
 
         // Refresh live analytics and disruptions workspace from DB
@@ -661,10 +673,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteOrder = async (id: string) => {
     setOrders((current) => current.filter((order) => order.id !== id))
     setSchedule((current) => current.filter((task) => task.orderId !== id))
+    setOriginalSchedule((current) => current.filter((task) => task.orderId !== id))
     try {
       await api.deleteJob(id)
     } catch { /* local removal is done */ }
     pushToast('Order removed', `${id} was removed from the active plan.`, 'warning')
+    refreshAnalytics()
   }
 
   const addMachine = async (machine: Omit<Machine, 'utilization' | 'task'>) => {
@@ -816,22 +830,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const generateSchedule = async () => {
+    if (orders.length === 0) {
+      setSchedule([])
+      setOriginalSchedule([])
+      setScheduleVersion((v) => v + 1)
+      pushToast('No orders to schedule', 'Add customer orders in Order Management first.', 'info')
+      return
+    }
     setIsLoading(true)
     try {
       const res = await api.generateSchedule()
-      if (res.operations && res.operations.length > 0) {
+      if (res && res.operations) {
         const tasks = mapBackendOpsToTasks(res.operations, orders)
         setSchedule(tasks)
         setOriginalSchedule(tasks)
         setScheduleVersion((v) => v + 1)
         pushToast('OR-Tools schedule generated', `Plan ${res.schedule_id} generated (${res.solver_status}). 7/7 constraints passed.`)
+      } else {
+        setSchedule([])
+        setOriginalSchedule([])
       }
       await refreshAnalytics()
     } catch (err: any) {
-      console.warn('API generate schedule failed, using local simulation:', err)
-      setSchedule((current) => current.map((task, index) => (index === 2 ? { ...task, machineId: 'CNC-2', start: '10:00', end: '18:00', status: 'Rescheduled' } : task)))
-      setScheduleVersion((v) => v + 1)
-      pushToast('Schedule updated', 'The active plan reflects capacity snapshot.')
+      console.warn('API generate schedule failed:', err)
+      pushToast('Scheduling error', err?.message || 'Could not generate schedule.', 'error')
     } finally {
       setIsLoading(false)
     }
@@ -844,6 +866,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     overtime: boolean
     mode?: 'optimization' | 'recovery' | 'auto'
   }) => {
+    if (orders.length === 0) {
+      setProposedSchedule([])
+      setProposedScheduleId(null)
+      setProposedHasChanges(false)
+      setProposedChangesCount(0)
+      pushToast('No orders to optimize', 'Add customer orders in Order Management first.', 'info')
+      return
+    }
     setIsLoading(true)
     setProposedError(null)
     try {

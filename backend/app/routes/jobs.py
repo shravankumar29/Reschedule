@@ -287,6 +287,8 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
     j = db.query(Job).filter(Job.job_id == job_id).first()
     if not j:
         raise HTTPException(404, "Job not found")
+    # Clean up associated schedule operations across all schedules
+    db.query(ScheduleOperation).filter(ScheduleOperation.job_id == job_id).delete()
     db.delete(j)
     db.commit()
 

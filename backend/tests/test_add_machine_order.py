@@ -156,3 +156,62 @@ def test_delete_machine_workflow(db):
         delete_machine("MCH-ACTIVE", db=db)
     assert exc_info_409.value.status_code == 409
     assert "active scheduled operation" in exc_info_409.value.detail
+
+
+def test_empty_orders_schedule_workflow(db):
+    from app.routes.jobs import delete_job
+    from app.routes.scheduling import get_current_schedule
+    from app.models.schedule import ScheduleOperation
+
+    # 1. Setup machine and job
+    create_machine(
+        MachineCreate(
+            machine_id="MCH-CLEAN",
+            name="Clean Test Machine",
+            machine_type="CNC Lathe",
+            supported_operations=["Turning"],
+        ),
+        db=db,
+    )
+    create_job(
+        JobCreate(
+            job_id="J-TO-DELETE",
+            customer_name="Customer X",
+            product_name="Product X",
+            quantity=10,
+            priority="Medium",
+            order_date="2026-11-07",
+            deadline="2026-11-12",
+            operations=[
+                OperationCreate(
+                    operation_name="Turning",
+                    processing_time=1.0,
+                    eligible_machine_ids=["MCH-CLEAN"],
+                    sequence_number=1,
+                )
+            ],
+        ),
+        db=db,
+    )
+
+    # 2. Generate schedule - should contain 1 operation
+    sched = generate_schedule(db=db)
+    assert sched["solver_status"] in ["OPTIMAL", "FEASIBLE"]
+    assert len(sched["operations"]) >= 1
+
+    # 3. Delete the job
+    delete_job("J-TO-DELETE", db=db)
+
+    # 4. Verify ScheduleOperation for deleted job was removed from database
+    orphan_ops = db.query(ScheduleOperation).filter(ScheduleOperation.job_id == "J-TO-DELETE").count()
+    assert orphan_ops == 0
+
+    # 5. Verify get_current_schedule returns 0 operations since all jobs are deleted
+    curr = get_current_schedule(db=db)
+    assert len(curr.operations) == 0
+
+    # 6. Generate schedule with 0 jobs - should succeed with 0 operations and OPTIMAL status
+    empty_sched = generate_schedule(db=db)
+    assert empty_sched["solver_status"] == "OPTIMAL"
+    assert len(empty_sched["operations"]) == 0
+    assert empty_sched["makespan_hours"] == 0.0

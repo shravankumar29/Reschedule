@@ -68,6 +68,8 @@ def compute_machine_utilization_data(
     """Compute exact machine-wise utilization, downtime, and operational status."""
     start_str, end_str, num_days = parse_date_window(range_type, start_date, end_date)
     machines = db.query(Machine).all()
+    jobs = db.query(Job).all()
+    existing_job_ids = {j.job_id for j in jobs}
     active_sched = get_active_schedule(db)
 
     # Active disruptions
@@ -113,8 +115,8 @@ def compute_machine_utilization_data(
             op_start_date = op.date or "2026-11-07"
             op_end_date = op.end_date or op_start_date
 
-            # Check date overlap with window [start_str, end_str]
-            if op_start_date <= end_str and op_end_date >= start_str:
+            # Check date overlap with window [start_str, end_str] and ensure job still exists
+            if op.job_id in existing_job_ids and op_start_date <= end_str and op_end_date >= start_str:
                 dur = op.duration if op.duration else max(0.5, op.end_time - op.start_time)
                 scheduled_hours_by_machine[op.machine_id] = (
                     scheduled_hours_by_machine.get(op.machine_id, 0.0) + dur
@@ -194,6 +196,8 @@ def compute_overview_kpis(
     start_str, end_str, num_days = parse_date_window(range_type, start_date, end_date)
     jobs = db.query(Job).all()
     machines = db.query(Machine).all()
+    jobs = db.query(Job).all()
+    existing_job_ids = {j.job_id for j in jobs}
     active_sched = get_active_schedule(db)
     active_disruptions = (
         db.query(Disruption).filter(Disruption.status != "Resolved").all()
@@ -322,8 +326,10 @@ def compute_production_output_chart(
             op_d = op.date or "2026-11-07"
             if op_d in daily_buckets:
                 job = jobs.get(op.job_id)
+                if not job:
+                    continue
                 # Compute fractional units for this operation
-                qty = job.quantity if job else 200
+                qty = job.quantity
                 # Approximate units proportional to duration
                 dur = op.duration if op.duration else 2.0
                 units = int(round(qty * (dur / 8.0)))

@@ -42,6 +42,32 @@ def generate_schedule(db: Session = Depends(get_db)) -> Dict[str, Any]:
         schedule_id=schedule_id,
         schedule_type="initial",
     )
+    if result.get("solver_status") == "NO_JOBS":
+        db.query(Schedule).filter(Schedule.status == "active").update({"status": "superseded"})
+        empty_sched = Schedule(
+            schedule_id=schedule_id,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            schedule_type="initial",
+            status="active",
+            makespan_hours=0.0,
+            total_jobs=0,
+            on_time_count=0,
+            delayed_count=0,
+            solver_status="OPTIMAL",
+        )
+        db.add(empty_sched)
+        db.commit()
+        return {
+            "schedule_id": schedule_id,
+            "solver_status": "OPTIMAL",
+            "operations": [],
+            "makespan_hours": 0.0,
+            "total_jobs": 0,
+            "on_time_count": 0,
+            "delayed_count": 0,
+            "validation": {"valid": True, "errors": []},
+        }
+
     if result.get("solver_status") not in ("OPTIMAL", "FEASIBLE"):
         raise HTTPException(422, detail=result.get("error", "Solver failed"))
     # Validate
@@ -65,6 +91,19 @@ def reschedule(payload: Optional[RescheduleRequest] = None, db: Session = Depend
     }
 
     result = run_rescheduling(db=db, disruption_id=payload.disruption_id, options=options)
+    if result.get("solver_status") == "NO_JOBS":
+        return {
+            "schedule_id": result.get("schedule_id", f"SCH-{uuid.uuid4().hex[:8].upper()}"),
+            "solver_status": "OPTIMAL",
+            "operations": [],
+            "makespan_hours": 0.0,
+            "total_jobs": 0,
+            "has_changes": False,
+            "changes_count": 0,
+            "changed_operations": [],
+            "validation": {"valid": True, "errors": []},
+        }
+
     if result.get("solver_status") == "INFEASIBLE":
         result["validation"] = {"valid": False, "errors": [result.get("error", "No feasible schedule found")]}
         return result
@@ -608,26 +647,30 @@ def get_current_schedule(
     if not s:
         raise HTTPException(404, "No active schedule. Run /api/schedule/generate first.")
 
+    # Filter operations to only include jobs that currently exist in the database
+    existing_job_ids = {j.job_id for j in db.query(Job.job_id).all()}
+    valid_ops = [op for op in s.operations if op.job_id in existing_job_ids]
+
     if start_date and end_date:
-        filtered_ops = [
-            op for op in s.operations
+        valid_ops = [
+            op for op in valid_ops
             if (op.date or "2026-11-07") <= end_date and (op.end_date or op.date or "2026-11-07") >= start_date
         ]
-        return ScheduleRead(
-            id=s.id,
-            schedule_id=s.schedule_id,
-            created_at=s.created_at,
-            schedule_type=s.schedule_type,
-            status=s.status,
-            makespan_hours=s.makespan_hours,
-            total_jobs=s.total_jobs,
-            on_time_count=s.on_time_count,
-            delayed_count=s.delayed_count,
-            disruption_id=s.disruption_id,
-            solver_status=s.solver_status,
-            operations=filtered_ops,
-        )
-    return s
+
+    return ScheduleRead(
+        id=s.id,
+        schedule_id=s.schedule_id,
+        created_at=s.created_at,
+        schedule_type=s.schedule_type,
+        status=s.status,
+        makespan_hours=s.makespan_hours if valid_ops else 0.0,
+        total_jobs=len(existing_job_ids),
+        on_time_count=s.on_time_count if valid_ops else 0,
+        delayed_count=s.delayed_count if valid_ops else 0,
+        disruption_id=s.disruption_id,
+        solver_status=s.solver_status,
+        operations=valid_ops,
+    )
 
 
 @router.get("/schedule/history", response_model=List[ScheduleRead])
