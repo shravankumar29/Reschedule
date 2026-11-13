@@ -106,7 +106,7 @@ interface AppContextValue {
   resetDemoData: () => Promise<void>
 }
 
-const STORAGE_KEY = 'reschedule-state-v1'
+const STORAGE_KEY = 'reschedule-state-v2'
 const AppContext = createContext<AppContextValue | null>(null)
 
 interface PersistedState {

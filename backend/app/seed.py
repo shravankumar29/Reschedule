@@ -42,7 +42,7 @@ def seed_machines(db: Session):
             machine_id="CNC-1",
             name="CNC Turning Cell 01",
             machine_type="CNC Lathe",
-            supported_operations=["Turning", "Drilling", "Boring"],
+            supported_operations=["Turning", "Drilling", "Boring", "Milling", "Grinding", "Finishing", "Tapping"],
             available=True,
             working_start_hour=6,
             working_end_hour=22,
@@ -53,43 +53,10 @@ def seed_machines(db: Session):
             machine_id="CNC-2",
             name="CNC Turning Cell 02",
             machine_type="CNC Lathe",
-            supported_operations=["Turning", "Drilling", "Boring"],
+            supported_operations=["Turning", "Drilling", "Boring", "Milling", "Grinding", "Finishing", "Tapping"],
             available=True,
             working_start_hour=6,
             working_end_hour=22,
-            maintenance_periods=[],
-            utilization=0,
-        ),
-        Machine(
-            machine_id="MILL-1",
-            name="Vertical Milling Centre 01",
-            machine_type="Milling Centre",
-            supported_operations=["Milling", "Drilling", "Tapping"],
-            available=True,
-            working_start_hour=6,
-            working_end_hour=22,
-            maintenance_periods=[],
-            utilization=0,
-        ),
-        Machine(
-            machine_id="MILL-2",
-            name="Horizontal Milling Centre 02",
-            machine_type="Milling Centre",
-            supported_operations=["Milling", "Drilling"],
-            available=True,
-            working_start_hour=6,
-            working_end_hour=22,
-            maintenance_periods=[],
-            utilization=0,
-        ),
-        Machine(
-            machine_id="GRIND-1",
-            name="Surface Grinding Station",
-            machine_type="Surface Grinder",
-            supported_operations=["Grinding", "Finishing"],
-            available=True,
-            working_start_hour=7,
-            working_end_hour=19,
             maintenance_periods=[],
             utilization=0,
         ),
@@ -176,8 +143,8 @@ def seed_products(db: Session):
             "is_active": True,
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"], "required_material_id": "MAT-001", "required_material_qty": 48.0},
-                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"]},
-                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -189,7 +156,7 @@ def seed_products(db: Session):
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 4.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"], "required_material_id": "MAT-004", "required_material_qty": 20.0},
                 {"operation_name": "Boring", "sequence_number": 2, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
-                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -199,9 +166,9 @@ def seed_products(db: Session):
             "description": "High-grade alloy steel internal gear ring with CNC milled teeth and finish ground outer diameter.",
             "is_active": True,
             "routing_operations": [
-                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 3.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"], "required_material_id": "MAT-002", "required_material_qty": 35.0},
-                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-1", "CNC-2"]},
-                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 3.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"], "required_material_id": "MAT-002", "required_material_qty": 35.0},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -211,9 +178,9 @@ def seed_products(db: Session):
             "description": "Precision milled mounting bracket for industrial servo actuators.",
             "is_active": True,
             "routing_operations": [
-                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
-                {"operation_name": "Tapping", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1"]},
-                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Tapping", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -223,9 +190,9 @@ def seed_products(db: Session):
             "description": "Corrosion-resistant SS 316L mounting interface plate with multi-hole pattern.",
             "is_active": True,
             "routing_operations": [
-                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 4.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
-                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-2", "CNC-2"]},
-                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 4.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -236,7 +203,7 @@ def seed_products(db: Session):
             "is_active": True,
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
-                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -247,8 +214,8 @@ def seed_products(db: Session):
             "is_active": True,
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
-                {"operation_name": "Milling", "sequence_number": 2, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
-                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Milling", "sequence_number": 2, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -259,7 +226,7 @@ def seed_products(db: Session):
             "is_active": True,
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
-                {"operation_name": "Grinding", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Grinding", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -269,8 +236,8 @@ def seed_products(db: Session):
             "description": "Precision milled retainer cap with oil seal groove.",
             "is_active": True,
             "routing_operations": [
-                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
-                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-2"]},
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
         {
@@ -282,7 +249,7 @@ def seed_products(db: Session):
             "routing_operations": [
                 {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
                 {"operation_name": "Boring", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
-                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
             ],
         },
     ]
@@ -302,10 +269,8 @@ def seed_products(db: Session):
 
 def seed_jobs(db: Session):
     today = "2026-11-07"
-    # Deadlines spread over the next 3 days
     d1 = "2026-11-08"
     d2 = "2026-11-09"
-    d3 = "2026-11-10"
 
     jobs_data = [
         {
@@ -314,13 +279,28 @@ def seed_jobs(db: Session):
             "product_name": "Hydraulic Valve Housing",
             "quantity": 480,
             "priority": "High",
-            "order_date": "2026-11-07",
-            "deadline": "2026-11-09",
+            "order_date": today,
+            "deadline": d2,
             "status": "Pending",
             "operations": [
-                {"operation_id": "J-101-OP1", "operation_name": "Turning", "processing_time": 3.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-001", "required_material_qty": 48.0},
-                {"operation_id": "J-101-OP2", "operation_name": "Drilling", "processing_time": 2.0, "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-101-OP3", "operation_name": "Grinding", "processing_time": 1.5, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
+                {
+                    "operation_id": "J-101-OP1",
+                    "operation_name": "Turning",
+                    "processing_time": 3.0,
+                    "eligible_machine_ids": ["CNC-1", "CNC-2"],
+                    "sequence_number": 1,
+                    "status": "Pending",
+                    "required_material_id": "MAT-001",
+                    "required_material_qty": 48.0,
+                },
+                {
+                    "operation_id": "J-101-OP2",
+                    "operation_name": "Drilling",
+                    "processing_time": 2.0,
+                    "eligible_machine_ids": ["CNC-1", "CNC-2"],
+                    "sequence_number": 2,
+                    "status": "Pending",
+                },
             ],
         },
         {
@@ -328,131 +308,29 @@ def seed_jobs(db: Session):
             "customer_name": "Tata Motors",
             "product_name": "Drive Shaft Coupling",
             "quantity": 200,
-            "priority": "Urgent",
-            "order_date": "2026-11-07",
-            "deadline": "2026-11-08",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-102-OP1", "operation_name": "Turning", "processing_time": 4.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-004", "required_material_qty": 20.0},
-                {"operation_id": "J-102-OP2", "operation_name": "Boring", "processing_time": 2.5, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-102-OP3", "operation_name": "Grinding", "processing_time": 1.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-103",
-            "customer_name": "Bosch India",
-            "product_name": "Precision Gear Ring",
-            "quantity": 300,
             "priority": "High",
-            "order_date": "2026-11-07",
-            "deadline": "2026-11-09",
+            "order_date": today,
+            "deadline": d1,
             "status": "Pending",
             "operations": [
-                {"operation_id": "J-103-OP1", "operation_name": "Milling", "processing_time": 3.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-002", "required_material_qty": 35.0},
-                {"operation_id": "J-103-OP2", "operation_name": "Drilling", "processing_time": 2.0, "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-1", "CNC-2"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-103-OP3", "operation_name": "Grinding", "processing_time": 2.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-104",
-            "customer_name": "L&T Engineering",
-            "product_name": "Servo Bracket Assembly",
-            "quantity": 150,
-            "priority": "Medium",
-            "order_date": "2026-11-07",
-            "deadline": "2026-11-09",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-104-OP1", "operation_name": "Milling", "processing_time": 2.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-104-OP2", "operation_name": "Tapping", "processing_time": 1.5, "eligible_machine_ids": ["MILL-1"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-104-OP3", "operation_name": "Finishing", "processing_time": 1.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-105",
-            "customer_name": "Godrej Aerospace",
-            "product_name": "Stainless Mount Plate",
-            "quantity": 860,
-            "priority": "High",
-            "order_date": "2026-11-08",
-            "deadline": "2026-11-10",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-105-OP1", "operation_name": "Milling", "processing_time": 4.0, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-105-OP2", "operation_name": "Drilling", "processing_time": 2.0, "eligible_machine_ids": ["MILL-2", "CNC-2"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-105-OP3", "operation_name": "Grinding", "processing_time": 1.5, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-106",
-            "customer_name": "Bajaj Auto",
-            "product_name": "Conveyor Idler Shaft",
-            "quantity": 650,
-            "priority": "Medium",
-            "order_date": "2026-11-10",
-            "deadline": "2026-11-13",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-106-OP1", "operation_name": "Turning", "processing_time": 3.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-106-OP2", "operation_name": "Drilling", "processing_time": 1.5, "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"], "sequence_number": 2, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-107",
-            "customer_name": "Crompton Greaves",
-            "product_name": "Motor End Shield",
-            "quantity": 400,
-            "priority": "Low",
-            "order_date": "2026-11-10",
-            "deadline": "2026-11-14",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-107-OP1", "operation_name": "Turning", "processing_time": 2.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-107-OP2", "operation_name": "Milling", "processing_time": 2.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-107-OP3", "operation_name": "Finishing", "processing_time": 1.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-108",
-            "customer_name": "Thermax Ltd",
-            "product_name": "Pump Impeller",
-            "quantity": 120,
-            "priority": "Medium",
-            "order_date": "2026-11-11",
-            "deadline": "2026-11-14",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-108-OP1", "operation_name": "Turning", "processing_time": 2.5, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-108-OP2", "operation_name": "Grinding", "processing_time": 2.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 2, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-109",
-            "customer_name": "Atlas Copco",
-            "product_name": "Bearing Retainer Cap",
-            "quantity": 920,
-            "priority": "Low",
-            "order_date": "2026-11-11",
-            "deadline": "2026-11-15",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-109-OP1", "operation_name": "Milling", "processing_time": 1.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-109-OP2", "operation_name": "Drilling", "processing_time": 1.0, "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-2"], "sequence_number": 2, "status": "Pending"},
-            ],
-        },
-        {
-            "job_id": "J-110",
-            "customer_name": "Kirloskar Electric",
-            "product_name": "Rotor Shaft Blank",
-            "quantity": 75,
-            "priority": "Urgent",
-            "order_date": "2026-11-12",
-            "deadline": "2026-11-15",
-            "status": "Pending",
-            "operations": [
-                {"operation_id": "J-110-OP1", "operation_name": "Turning", "processing_time": 3.5, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
-                {"operation_id": "J-110-OP2", "operation_name": "Boring", "processing_time": 2.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 2, "status": "Pending"},
-                {"operation_id": "J-110-OP3", "operation_name": "Grinding", "processing_time": 1.5, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
+                {
+                    "operation_id": "J-102-OP1",
+                    "operation_name": "Turning",
+                    "processing_time": 4.0,
+                    "eligible_machine_ids": ["CNC-1", "CNC-2"],
+                    "sequence_number": 1,
+                    "status": "Pending",
+                    "required_material_id": "MAT-004",
+                    "required_material_qty": 20.0,
+                },
+                {
+                    "operation_id": "J-102-OP2",
+                    "operation_name": "Boring",
+                    "processing_time": 2.5,
+                    "eligible_machine_ids": ["CNC-1", "CNC-2"],
+                    "sequence_number": 2,
+                    "status": "Pending",
+                },
             ],
         },
     ]
@@ -496,7 +374,13 @@ def seed_all(reset: bool = True):
         seed_materials(db)
         seed_products(db)
         seed_jobs(db)
-        print("Seed complete. Run POST /api/schedule/generate to build the initial schedule.")
+        from .routes.scheduling import generate_schedule
+        try:
+            generate_schedule(db)
+            print("Initial schedule generated successfully.")
+        except Exception as e:
+            print("Auto-generating initial schedule failed:", e)
+        print("Seed complete.")
     finally:
         db.close()
 
