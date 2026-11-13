@@ -275,7 +275,12 @@ def run_scheduling_engine(
         prev_end_var = None
 
         for op in sorted(job.operations, key=lambda x: x.sequence_number):
-            dur_min = max(1, int(op.processing_time * MINS_PER_HOUR))
+            dur_basis = getattr(op, "duration_basis", "fixed") or "fixed"
+            if dur_basis == "per_unit":
+                effective_hours = op.processing_time * (job.quantity or 1)
+            else:
+                effective_hours = op.processing_time
+            dur_min = max(1, int(effective_hours * MINS_PER_HOUR))
             op_id = op.operation_id
 
             # --- Frozen (completed) operation ---

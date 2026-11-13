@@ -83,6 +83,7 @@ export interface BackendOperation {
 export interface BackendJob {
   id: number
   job_id: string
+  product_id?: string
   customer_name: string
   product_name: string
   quantity: number
@@ -364,9 +365,19 @@ export const api = {
 
   // Jobs
   getJobs: () => request<BackendJob[]>('/jobs/'),
+  getJob: (id: string) => request<BackendJob>(`/jobs/${id}`),
+  getJobDetails: (jobId: string) => request<any>(`/jobs/${jobId}/details`),
   createJob: (data: any) => request<BackendJob>('/jobs/', { method: 'POST', body: JSON.stringify(data) }),
   updateJob: (id: string, data: any) => request<BackendJob>(`/jobs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteJob: (id: string) => request<void>(`/jobs/${id}`, { method: 'DELETE' }),
+
+  // Product Catalog & Routing Templates
+  getProducts: (activeOnly = false) => request<any[]>(`/products/?active_only=${activeOnly}`),
+  getProduct: (productId: string) => request<any>(`/products/${productId}`),
+  getProductRouting: (productId: string) => request<any[]>(`/products/${productId}/routing`),
+  createProduct: (data: any) => request<any>('/products/', { method: 'POST', body: JSON.stringify(data) }),
+  updateProduct: (productId: string, data: any) => request<any>(`/products/${productId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deactivateProduct: (productId: string, hardDelete = false) => request<void>(`/products/${productId}?hard_delete=${hardDelete}`, { method: 'DELETE' }),
 
   // Disruptions & Multi-Category Disruption Workspace
   getDisruptions: () => request<BackendDisruption[]>('/disruptions/'),

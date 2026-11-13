@@ -9,6 +9,7 @@ class Job(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, unique=True, index=True, nullable=False)
+    product_id = Column(String, ForeignKey("products.product_id"), nullable=True)
     customer_name = Column(String, nullable=False)
     product_name = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
@@ -29,6 +30,8 @@ class Operation(Base):
     job_id = Column(String, ForeignKey("jobs.job_id"), nullable=False)
     operation_name = Column(String, nullable=False)
     processing_time = Column(Float, nullable=False)   # hours
+    duration_basis = Column(String, default="fixed")  # fixed | per_unit | per_batch
+    routing_operation_id = Column(String, nullable=True)
     eligible_machine_ids = Column(JSON, nullable=False)  # list[str] machine_id values
     sequence_number = Column(Integer, nullable=False)
     status = Column(String, default="Pending")  # Pending | Scheduled | Ongoing | Completed | Delayed

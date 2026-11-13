@@ -6,8 +6,12 @@ from pydantic import BaseModel, Field
 class OperationCreate(BaseModel):
     operation_name: str
     processing_time: float = Field(..., gt=0, description="Processing time in hours")
+    duration_basis: str = Field("fixed", pattern="^(fixed|per_unit|per_batch)$")
     eligible_machine_ids: List[str]
     sequence_number: int = Field(..., ge=1)
+    routing_operation_id: Optional[str] = None
+    required_material_id: Optional[str] = None
+    required_material_qty: Optional[float] = None
 
 
 class OperationRead(OperationCreate):
@@ -21,6 +25,7 @@ class OperationRead(OperationCreate):
 
 class JobCreate(BaseModel):
     job_id: str = Field(..., json_schema_extra={"example": "J-101"})
+    product_id: Optional[str] = None
     customer_name: str
     product_name: str
     quantity: int = Field(..., gt=0)
@@ -31,6 +36,7 @@ class JobCreate(BaseModel):
 
 
 class JobUpdate(BaseModel):
+    product_id: Optional[str] = None
     customer_name: Optional[str] = None
     product_name: Optional[str] = None
     quantity: Optional[int] = None
@@ -43,6 +49,7 @@ class JobUpdate(BaseModel):
 class JobRead(BaseModel):
     id: int
     job_id: str
+    product_id: Optional[str] = None
     customer_name: str
     product_name: str
     quantity: int

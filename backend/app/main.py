@@ -6,6 +6,7 @@ from .database import Base, engine
 from .routes import (
     machines_router,
     jobs_router,
+    products_router,
     disruptions_router,
     scheduling_router,
     analytics_router,
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(machines_router)
 app.include_router(jobs_router)
+app.include_router(products_router)
 app.include_router(disruptions_router)
 app.include_router(scheduling_router)
 app.include_router(analytics_router)

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, BellRing, Boxes, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, CloudCog, Download, Factory, FileDown, FileText, Gauge, GitBranch, HardHat, Layers3, MoreHorizontal, PackageCheck, Pencil, Plus, Printer, RefreshCw, Search, ShieldCheck, Sparkles, TimerReset, Trash2, TrendingUp, UserRound, Wrench, X, Zap } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, BellRing, Boxes, CalendarClock, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, CloudCog, Download, Eye, Factory, FileDown, FileText, Gauge, GitBranch, HardHat, Info, Layers, Layers3, MoreHorizontal, Package, PackageCheck, Pencil, Plus, Printer, RefreshCw, Search, ShieldCheck, Sparkles, TimerReset, Trash2, TrendingUp, UserRound, Wrench, X, Zap } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, ConfirmLine, EmptyState, FilterBar, GanttTimeline, LogoMark, MiniBar, Modal, PageHeader, Panel, PriorityBadge, QuickAction, SelectField, SectionDivider, StatCard, StatusBadge, TextField, Toggle } from './components'
 import { OperationEditorModal } from './components/OperationEditorModal'
 import { useApp } from './context/AppContext'
+import { floatToTime } from './api/client'
 import { delayData, monthlyTrend, productionTrend } from './data/mockData'
-import type { DisruptionType, FactorySettings, Machine, Order, Priority, ScheduleTask } from './types'
+import type { DisruptionType, FactorySettings, Machine, Order, Priority, ScheduleTask, Product, ProductOperation, OrderDetailsData } from './types'
 
 const chartTooltip = { contentStyle: { border: '1px solid #e1e6e3', borderRadius: 8, boxShadow: '0 10px 25px rgba(37,52,59,.08)', fontSize: 12 }, labelStyle: { color: '#25343b', fontWeight: 700 } }
 const today = '2026-11-07'
@@ -423,60 +424,1218 @@ function HealthItem({ label, value, tone }: { label: string; value: string; tone
 function Detail({ label, value }: { label: string; value: string }) { return <div className="detail-item"><span>{label}</span><strong>{value}</strong></div> }
 
 const emptyOrder: Omit<Order, 'id'> = { product: 'Hydraulic Valve Housing', quantity: 240, orderDate: today, deadline: '2026-11-12', priority: 'Medium', machine: 'CNC-1', status: 'Pending', estimatedHours: 8 }
+
 export function OrdersPage() {
-  const { orders, machines, addOrder, updateOrder, updateOrderStatus, deleteOrder, pushToast, analyticsOverview } = useApp()
+  const {
+    orders,
+    machines,
+    materials,
+    products,
+    refreshProducts,
+    addProduct,
+    updateProduct,
+    deactivateProduct,
+    fetchOrderDetails,
+    addOrder,
+    updateOrder,
+    updateOrderStatus,
+    deleteOrder,
+    pushToast,
+    analyticsOverview,
+  } = useApp()
+
+  const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<'orders' | 'catalog'>('orders')
+
+  // Orders Tab filters
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState('All priorities')
   const [status, setStatus] = useState('All statuses')
-  const [modal, setModal] = useState<'add' | 'edit' | 'view' | null>(null)
-  // Always use the first real (non-mock) machine ID as default
-  const realMachines = machines.filter((m) => !m.id.match(/^M0?\d+$/))
-  const defaultMachineId = realMachines[0]?.id || machines[0]?.id || 'CNC-1'
-  const [form, setForm] = useState<Omit<Order, 'id'>>({ ...emptyOrder, machine: defaultMachineId })
-  const [selected, setSelected] = useState<Order | null>(null)
-  const filtered = orders.filter((order) => `${order.id} ${order.product}`.toLowerCase().includes(query.toLowerCase()) && (priority === 'All priorities' || order.priority === priority) && (status === 'All statuses' || order.status === status))
-  const openAdd = () => {
-    // Re-read machines at open time to get latest backend IDs
-    const realMs = machines.filter((m) => !m.id.match(/^M0?\d+$/))
-    const firstMachineId = realMs[0]?.id || machines[0]?.id || 'CNC-1'
-    setForm({
-      product: '',
+
+  // Order Details Drawer state (Part 4)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerLoading, setDrawerLoading] = useState(false)
+  const [activeOrderDetails, setActiveOrderDetails] = useState<OrderDetailsData | null>(null)
+
+  // Add Order Modal state (Part 3)
+  const [addOrderModalOpen, setAddOrderModalOpen] = useState(false)
+  const [orderForm, setOrderForm] = useState({
+    customerName: '',
+    productId: '',
+    quantity: 100,
+    orderDate: today,
+    deadline: '2026-11-20',
+    priority: 'Medium' as Priority,
+  })
+
+  // Product Catalog Tab state (Part 1 & 7)
+  const [catalogQuery, setCatalogQuery] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('All categories')
+  const [productModal, setProductModal] = useState<'add' | 'edit' | null>(null)
+  const [productForm, setProductForm] = useState<{
+    product_id: string
+    name: string
+    category: string
+    description: string
+    is_active: boolean
+    routing_operations: ProductOperation[]
+  }>({
+    product_id: '',
+    name: '',
+    category: 'Precision Machining',
+    description: '',
+    is_active: true,
+    routing_operations: [],
+  })
+
+  // Distinct categories
+  const categories = useMemo(() => {
+    const set = new Set<string>()
+    products.forEach((p) => {
+      if (p.category) set.add(p.category)
+    })
+    return Array.from(set)
+  }, [products])
+
+  // Real factory machines
+  const realMachines = useMemo(() => {
+    const list = machines.filter((m) => !m.id.match(/^M0?\d+$/))
+    return list.length > 0 ? list : machines
+  }, [machines])
+
+  // Open Drawer for an order
+  const handleOpenDrawer = async (orderId: string) => {
+    setDrawerOpen(true)
+    setDrawerLoading(true)
+    try {
+      const details = await fetchOrderDetails(orderId)
+      setActiveOrderDetails(details)
+    } catch (err: any) {
+      console.warn('Failed to load order details from backend:', err)
+      const o = orders.find((item) => item.id === orderId)
+      if (o) {
+        setActiveOrderDetails({
+          job_id: o.id,
+          customer_name: o.customerName || 'Mahindra Precision',
+          product_name: o.product,
+          product_category: 'Standard Production',
+          quantity: o.quantity,
+          priority: o.priority,
+          order_date: o.orderDate,
+          deadline: o.deadline,
+          status: o.status,
+          is_rush_order: false,
+          risk_status: o.status === 'Delayed' ? 'Delayed' : 'On Track',
+          progress_pct: o.status === 'Completed' ? 100 : o.status === 'In Production' ? 50 : 0,
+          total_operations: 1,
+          completed_operations: o.status === 'Completed' ? 1 : 0,
+          running_operations: o.status === 'In Production' ? 1 : 0,
+          pending_operations: o.status === 'Pending' ? 1 : 0,
+          next_machine: o.machine,
+          routing_operations: [
+            {
+              operation_id: `${o.id}-OP1`,
+              operation_name: `${o.product} Machining`,
+              sequence_number: 1,
+              processing_time: o.estimatedHours || 4.0,
+              duration_basis: 'fixed',
+              eligible_machine_ids: [o.machine || 'CNC-1'],
+              assigned_machine: o.machine || 'CNC-1',
+              is_reassigned: false,
+              status: o.status === 'Completed' ? 'Completed' : 'Scheduled',
+            },
+          ],
+        })
+      }
+    } finally {
+      setDrawerLoading(false)
+    }
+  }
+
+  // Open Add Order modal
+  const openAddOrder = () => {
+    const activeProducts = products.filter((p) => p.is_active)
+    const initialProduct = activeProducts[0] || products[0]
+    setOrderForm({
+      customerName: 'Mahindra Precision',
+      productId: initialProduct?.product_id || '',
       quantity: 100,
       orderDate: today,
       deadline: '2026-11-20',
       priority: 'Medium',
-      machine: firstMachineId,
-      status: 'Pending',
-      estimatedHours: 8,
     })
-    setSelected(null)
-    setModal('add')
+    setAddOrderModalOpen(true)
   }
-  const openEdit = (order: Order) => { setForm(order); setSelected(order); setModal('edit') }
-  const save = (event: FormEvent) => {
-    event.preventDefault()
-    const product = (form.product || '').trim()
-    const quantity = Number(form.quantity)
-    if (!product) {
-      pushToast('Validation error', 'Please enter a product name.', 'error')
+
+  // Selected product in Add Order Form
+  const selectedProductForOrder = useMemo(() => {
+    return products.find((p) => p.product_id === orderForm.productId) || null
+  }, [products, orderForm.productId])
+
+  // Save new order
+  const handleSaveOrder = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!orderForm.customerName.trim()) {
+      pushToast('Validation error', 'Please enter a customer name.', 'error')
       return
     }
-    if (!quantity || quantity <= 0) {
+    if (!orderForm.productId) {
+      pushToast('Validation error', 'Please select a product from the catalog.', 'error')
+      return
+    }
+    if (!selectedProductForOrder) {
+      pushToast('Validation error', 'Selected product was not found.', 'error')
+      return
+    }
+    if (orderForm.quantity <= 0) {
       pushToast('Validation error', 'Quantity must be greater than 0.', 'error')
       return
     }
-    if (modal === 'edit' && selected) {
-      updateOrder({ ...form, product, quantity, id: selected.id })
-    } else {
-      addOrder({ ...form, product, quantity })
-    }
-    setModal(null)
+
+    const totalHours = selectedProductForOrder.routing_operations.reduce((sum, op) => {
+      const dur = op.duration_basis === 'per_unit' ? op.processing_time * orderForm.quantity : op.processing_time
+      return sum + dur
+    }, 0)
+
+    await addOrder({
+      customerName: orderForm.customerName.trim(),
+      product: selectedProductForOrder.name,
+      productId: selectedProductForOrder.product_id,
+      quantity: orderForm.quantity,
+      orderDate: orderForm.orderDate,
+      deadline: orderForm.deadline,
+      priority: orderForm.priority,
+      machine: selectedProductForOrder.routing_operations[0]?.eligible_machine_ids[0] || 'CNC-1',
+      estimatedHours: Math.round(totalHours * 10) / 10,
+    })
+    setAddOrderModalOpen(false)
   }
-  // Show real machine IDs first; fall back to defaults if backend not loaded
-  const realMachineIds = machines.filter((m) => !m.id.match(/^M0?\d+$/)).map((m) => m.id)
-  const machineOptions = realMachineIds.length > 0 ? realMachineIds : machines.length > 0 ? machines.map((m) => m.id) : ['CNC-1', 'CNC-2', 'MILL-1', 'MILL-2', 'GRIND-1']
-  return <div className="page-stack"><PageHeader eyebrow="OPERATIONS / CUSTOMER COMMITMENTS" title="Order Management" subtitle="Manage customer orders and delivery commitments." actions={<Button icon={<Plus size={16} />} onClick={openAdd}>Add order</Button>} /><div className="stats-grid four"><StatCard label="Total orders" value={String(analyticsOverview?.total_orders ?? orders.length)} detail="In current order book" icon={ClipboardIcon} /><StatCard label="Pending" value={String(analyticsOverview?.pending_orders ?? orders.filter((order) => order.status === 'Pending').length)} detail="Awaiting production" icon={Clock3} tone="amber" /><StatCard label="Completed" value={String(analyticsOverview?.completed_orders ?? orders.filter((order) => order.status === 'Completed').length)} detail="Delivered" icon={PackageCheck} tone="blue" /><StatCard label="Urgent orders" value={String(analyticsOverview?.urgent_orders ?? orders.filter((order) => order.priority === 'High').length)} detail="High priority commitments" icon={Zap} tone="brick" /></div><Panel className="table-panel"><FilterBar><div className="table-search"><Search size={15} /><input placeholder="Search by order or product..." value={query} onChange={(event) => setQuery(event.target.value)} /></div><select value={priority} onChange={(event) => setPriority(event.target.value)}><option>All priorities</option><option>High</option><option>Medium</option><option>Low</option></select><select value={status} onChange={(event) => setStatus(event.target.value)}><option>All statuses</option><option>Pending</option><option>In Production</option><option>Completed</option><option>Delayed</option></select></FilterBar><div className="table-wrap"><table className="operations-table"><thead><tr><th>Order ID</th><th>Product name</th><th>Quantity</th><th>Order date</th><th>Delivery deadline</th><th>Priority</th><th>Assigned machine</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((order) => <tr key={order.id}><td><button className="link-button mono" onClick={() => { setSelected(order); setModal('view') }}>{order.id}</button></td><td><strong>{order.product}</strong></td><td>{order.quantity.toLocaleString()} units</td><td>{shortDate(order.orderDate)}</td><td className={order.status === 'Delayed' ? 'text-danger' : ''}>{shortDate(order.deadline)}</td><td><PriorityBadge value={order.priority} /></td><td><span className="machine-tag">{order.machine}</span></td><td><select className={`order-status-select status-${order.status.toLowerCase().replace(/\s+/g, '-')}`} value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value as Order['status'])} title={`Change status for ${order.id}`}><option value="Pending">Pending</option><option value="In Production">In Production</option><option value="Completed">Completed</option><option value="Delayed">Delayed</option></select></td><td><div className="row-actions"><button className="icon-btn" title="Edit" onClick={() => openEdit(order)}><Pencil size={14} /></button><button className="icon-btn danger-icon" title="Delete" onClick={() => { if (window.confirm(`Remove ${order.id}?`)) deleteOrder(order.id) }}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table>{filtered.length === 0 && <EmptyState icon={Search} title="No orders match" description="Try changing the search or filters." />}</div><div className="table-foot"><span>{filtered.length} visible orders</span><span>Showing live local workspace data</span></div></Panel><Modal open={modal === 'add' || modal === 'edit'} onClose={() => setModal(null)} title={modal === 'edit' ? 'Edit order' : 'Add new order'} subtitle="Capture the customer commitment before planning begins."><form onSubmit={save}><div className="form-grid"><TextField label="Product name" value={form.product} onChange={(value) => setForm({ ...form, product: value })} placeholder="e.g. Hydraulic Valve Housing" /><TextField label="Quantity" value={form.quantity} onChange={(value) => setForm({ ...form, quantity: Number(value) })} type="number" /><TextField label="Order date" value={form.orderDate} onChange={(value) => setForm({ ...form, orderDate: value })} type="date" /><TextField label="Delivery deadline" value={form.deadline} onChange={(value) => setForm({ ...form, deadline: value })} type="date" /><SelectField label="Priority" value={form.priority} onChange={(value) => setForm({ ...form, priority: value as Priority })} options={['High', 'Medium', 'Low']} /><SelectField label="Required machine" value={form.machine || machineOptions[0]} onChange={(value) => setForm({ ...form, machine: value })} options={machineOptions} /><SelectField label="Order status" value={form.status} onChange={(value) => setForm({ ...form, status: value as Order['status'] })} options={['Pending', 'In Production', 'Completed', 'Delayed']} /><TextField label="Estimated production time" value={form.estimatedHours} onChange={(value) => setForm({ ...form, estimatedHours: Number(value) })} type="number" /></div><div className="modal-actions"><Button variant="outline" onClick={() => setModal(null)}>Cancel</Button><Button type="submit">{modal === 'edit' ? 'Save changes' : 'Add order'}</Button></div></form></Modal><Modal open={modal === 'view'} onClose={() => setModal(null)} title={selected?.id ?? ''} subtitle="Order commitment detail"><div className="detail-grid">{selected && <><Detail label="Product" value={selected.product} /><Detail label="Quantity" value={`${selected.quantity.toLocaleString()} units`} /><Detail label="Order date" value={shortDate(selected.orderDate)} /><Detail label="Delivery deadline" value={shortDate(selected.deadline)} /><Detail label="Priority" value={selected.priority} /><Detail label="Assigned machine" value={selected.machine} /><div className="detail-item"><span>Status</span><div style={{ marginTop: 4 }}><select className={`order-status-select status-${selected.status.toLowerCase().replace(/\s+/g, '-')}`} value={selected.status} onChange={(event) => { const nextStatus = event.target.value as Order['status']; updateOrderStatus(selected.id, nextStatus); setSelected({ ...selected, status: nextStatus }) }} title="Click to change order status"><option value="Pending">Pending</option><option value="In Production">In Production</option><option value="Completed">Completed</option><option value="Delayed">Delayed</option></select></div></div><Detail label="Estimated time" value={`${selected.estimatedHours} hours`} /></>}</div><div className="modal-actions"><Button variant="outline" onClick={() => setModal(null)}>Close</Button>{selected && <Button onClick={() => { openEdit(selected) }}>Edit order</Button>}</div></Modal></div>
+
+  // Open Product Modal (Add or Edit)
+  const openProductModal = (prod?: Product) => {
+    if (prod) {
+      setProductForm({
+        product_id: prod.product_id,
+        name: prod.name,
+        category: prod.category || 'Precision Machining',
+        description: prod.description || '',
+        is_active: prod.is_active,
+        routing_operations: JSON.parse(JSON.stringify(prod.routing_operations || [])),
+      })
+      setProductModal('edit')
+    } else {
+      const nextNum = products.length + 1
+      const defaultMch = realMachines[0]?.id || 'CNC-1'
+      setProductForm({
+        product_id: `PROD-${String(nextNum).padStart(3, '0')}`,
+        name: '',
+        category: 'Precision Machining',
+        description: '',
+        is_active: true,
+        routing_operations: [
+          {
+            operation_name: 'Turning',
+            sequence_number: 1,
+            processing_time: 2.5,
+            duration_basis: 'fixed',
+            eligible_machine_ids: [defaultMch],
+          },
+        ],
+      })
+      setProductModal('add')
+    }
+  }
+
+  // Save product
+  const handleSaveProduct = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!productForm.name.trim()) {
+      pushToast('Validation error', 'Please enter a product name.', 'error')
+      return
+    }
+    if (!productForm.product_id.trim()) {
+      pushToast('Validation error', 'Please enter a product ID.', 'error')
+      return
+    }
+    if (!productForm.routing_operations || productForm.routing_operations.length === 0) {
+      pushToast('Validation error', 'Product must have at least one routing operation.', 'error')
+      return
+    }
+    for (const op of productForm.routing_operations) {
+      if (!op.operation_name.trim()) {
+        pushToast('Validation error', 'All operations must have a name.', 'error')
+        return
+      }
+      if (!op.processing_time || op.processing_time <= 0) {
+        pushToast('Validation error', `Processing time for "${op.operation_name}" must be greater than 0.`, 'error')
+        return
+      }
+      if (!op.eligible_machine_ids || op.eligible_machine_ids.length === 0) {
+        pushToast('Validation error', `Operation "${op.operation_name}" must have at least one eligible machine.`, 'error')
+        return
+      }
+    }
+
+    try {
+      if (productModal === 'edit') {
+        await updateProduct(productForm.product_id, productForm)
+      } else {
+        await addProduct(productForm)
+      }
+      setProductModal(null)
+    } catch (err: any) {
+      pushToast('Error saving product', err?.message || 'Operation failed.', 'error')
+    }
+  }
+
+  // Filtered orders
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const matchQuery = `${order.id} ${order.product} ${order.customerName || ''}`.toLowerCase().includes(query.toLowerCase())
+      const matchPriority = priority === 'All priorities' || order.priority === priority
+      const matchStatus = status === 'All statuses' || order.status === status
+      return matchQuery && matchPriority && matchStatus
+    })
+  }, [orders, query, priority, status])
+
+  // Filtered products
+  const filteredProducts = useMemo(() => {
+    return products.filter((prod) => {
+      const matchQuery = `${prod.product_id} ${prod.name} ${prod.description || ''}`.toLowerCase().includes(catalogQuery.toLowerCase())
+      const matchCategory = categoryFilter === 'All categories' || prod.category === categoryFilter
+      return matchQuery && matchCategory
+    })
+  }, [products, catalogQuery, categoryFilter])
+
+  return (
+    <div className="page-stack">
+      <PageHeader
+        eyebrow="OPERATIONS / ORDER DISPATCH & ROUTINGS"
+        title="Order Management"
+        subtitle="Manage customer orders, product routing templates and live production tracking."
+        actions={
+          activeTab === 'orders' ? (
+            <Button icon={<Plus size={16} />} onClick={openAddOrder}>
+              New customer order
+            </Button>
+          ) : (
+            <Button icon={<Plus size={16} />} onClick={() => openProductModal()}>
+              New product template
+            </Button>
+          )
+        }
+      />
+
+      {/* Segmented Tab Bar: Orders vs Product Catalog */}
+      <div className="disruption-tab-nav" style={{ marginBottom: 4 }}>
+        <button
+          className={`disruption-tab-btn ${activeTab === 'orders' ? 'active' : ''}`}
+          onClick={() => setActiveTab('orders')}
+          role="tab"
+          aria-selected={activeTab === 'orders'}
+        >
+          <ClipboardList size={16} />
+          <span>Customer Orders</span>
+          <span className="tab-counter-pill">{orders.length}</span>
+        </button>
+        <button
+          className={`disruption-tab-btn ${activeTab === 'catalog' ? 'active' : ''}`}
+          onClick={() => setActiveTab('catalog')}
+          role="tab"
+          aria-selected={activeTab === 'catalog'}
+        >
+          <Layers size={16} />
+          <span>Product Catalog & Routings</span>
+          <span className="tab-counter-pill alert">{products.length}</span>
+        </button>
+      </div>
+
+      {activeTab === 'orders' ? (
+        <>
+          {/* Section 1: KPI Summary Cards */}
+          <div className="stats-grid four">
+            <StatCard
+              label="Total orders"
+              value={String(analyticsOverview?.total_orders ?? orders.length)}
+              detail="Active order pipeline"
+              icon={ClipboardIcon}
+            />
+            <StatCard
+              label="Pending"
+              value={String(analyticsOverview?.pending_orders ?? orders.filter((order) => order.status === 'Pending').length)}
+              detail="Awaiting production"
+              icon={Clock3}
+              tone="amber"
+            />
+            <StatCard
+              label="Completed"
+              value={String(analyticsOverview?.completed_orders ?? orders.filter((order) => order.status === 'Completed').length)}
+              detail="Delivered to customer"
+              icon={PackageCheck}
+              tone="blue"
+            />
+            <StatCard
+              label="Urgent orders"
+              value={String(analyticsOverview?.urgent_orders ?? orders.filter((order) => order.priority === 'High').length)}
+              detail="Priority commitments"
+              icon={Zap}
+              tone="brick"
+            />
+          </div>
+
+          {/* Section 2: Orders Table with Clickable Rows */}
+          <Panel className="table-panel">
+            <FilterBar>
+              <div className="table-search">
+                <Search size={15} />
+                <input
+                  placeholder="Search by order ID, product, or customer..."
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+                <option>All priorities</option>
+                <option>High</option>
+                <option>Medium</option>
+                <option>Low</option>
+              </select>
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option>All statuses</option>
+                <option>Pending</option>
+                <option>In Production</option>
+                <option>Completed</option>
+                <option>Delayed</option>
+              </select>
+            </FilterBar>
+
+            <div className="table-wrap">
+              <table className="operations-table">
+                <thead>
+                  <tr>
+                    <th>Order ID</th>
+                    <th>Customer</th>
+                    <th>Product</th>
+                    <th>Quantity</th>
+                    <th>Order Date</th>
+                    <th>Deadline</th>
+                    <th>Priority</th>
+                    <th>Next Machine</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((order) => (
+                    <tr
+                      key={order.id}
+                      className="clickable-row"
+                      onClick={() => handleOpenDrawer(order.id)}
+                      title="Click row to view full order routing & progress"
+                    >
+                      <td>
+                        <span className="mono link-button" style={{ fontWeight: 700 }}>
+                          {order.id}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>
+                          {order.customerName || 'Mahindra Precision'}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <strong style={{ fontSize: 12 }}>{order.product}</strong>
+                          {order.productId && (
+                            <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'DM Mono' }}>
+                              {order.productId}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>{order.quantity.toLocaleString()} units</td>
+                      <td>{shortDate(order.orderDate)}</td>
+                      <td className={order.status === 'Delayed' ? 'text-danger' : ''}>
+                        {shortDate(order.deadline)}
+                      </td>
+                      <td>
+                        <PriorityBadge value={order.priority} />
+                      </td>
+                      <td>
+                        <span className="machine-tag">{order.machine}</span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <select
+                          className={`order-status-select status-${order.status.toLowerCase().replace(/\s+/g, '-')}`}
+                          value={order.status}
+                          onChange={(event) => updateOrderStatus(order.id, event.target.value as Order['status'])}
+                          title={`Change status for ${order.id}`}
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="In Production">In Production</option>
+                          <option value="Completed">Completed</option>
+                          <option value="Delayed">Delayed</option>
+                        </select>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="row-actions">
+                          <button
+                            className="icon-btn"
+                            title="View order details"
+                            onClick={() => handleOpenDrawer(order.id)}
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            className="icon-btn danger-icon"
+                            title="Delete order"
+                            onClick={() => {
+                              if (window.confirm(`Remove order ${order.id}?`)) deleteOrder(order.id)
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {filteredOrders.length === 0 && (
+                <EmptyState
+                  icon={Search}
+                  title="No customer orders match"
+                  description="Try adjusting your query or filter parameters."
+                />
+              )}
+            </div>
+
+            <div className="table-foot">
+              <span>{filteredOrders.length} active customer orders</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle2 size={13} color="var(--primary)" />
+                Connected to CP-SAT scheduling engine
+              </span>
+            </div>
+          </Panel>
+        </>
+      ) : (
+        /* Section 7: Product Catalog & Routing Templates */
+        <div className="page-stack">
+          {/* Catalog KPI Cards */}
+          <div className="stats-grid four">
+            <StatCard
+              label="Products in catalog"
+              value={String(products.length)}
+              detail="Standardized product lines"
+              icon={Package}
+            />
+            <StatCard
+              label="Active products"
+              value={String(products.filter((p) => p.is_active).length)}
+              detail="Available for customer orders"
+              icon={CheckCircle2}
+              tone="teal"
+            />
+            <StatCard
+              label="Routing operations"
+              value={String(
+                products.reduce((sum, p) => sum + (p.routing_operations?.length || 0), 0)
+              )}
+              detail="Predefined sequential steps"
+              icon={GitBranch}
+              tone="blue"
+            />
+            <StatCard
+              label="Factory machines"
+              value={String(realMachines.length)}
+              detail="Eligible machine cells"
+              icon={Wrench}
+              tone="amber"
+            />
+          </div>
+
+          <Panel className="table-panel">
+            <FilterBar>
+              <div className="table-search">
+                <Search size={15} />
+                <input
+                  placeholder="Search products by ID, name, or description..."
+                  value={catalogQuery}
+                  onChange={(e) => setCatalogQuery(e.target.value)}
+                />
+              </div>
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option>All categories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </FilterBar>
+
+            <div className="product-grid" style={{ padding: '4px 0' }}>
+              {filteredProducts.map((prod) => (
+                <div className="product-card" key={prod.product_id}>
+                  <div className="product-card-top">
+                    <div className="product-card-title">
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+                        {prod.product_id}
+                      </span>
+                      <strong>{prod.name}</strong>
+                    </div>
+                    <span className="product-category-pill">{prod.category}</span>
+                  </div>
+
+                  <p className="product-card-desc">
+                    {prod.description || 'Standard manufactured component with verified production routing.'}
+                  </p>
+
+                  <div className="product-routing-preview">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="preview-label">
+                        Production Route ({prod.routing_operations?.length || 0} Steps)
+                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600 }}>
+                        ~
+                        {prod.routing_operations
+                          ?.reduce((sum, op) => sum + op.processing_time, 0)
+                          .toFixed(1)}{' '}
+                        hrs total
+                      </span>
+                    </div>
+
+                    <div className="route-sequence-chips" style={{ marginTop: 2 }}>
+                      {prod.routing_operations && prod.routing_operations.length > 0 ? (
+                        prod.routing_operations.map((op, idx) => (
+                          <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <span className="route-chip">
+                              <span style={{ opacity: 0.65 }}>0{op.sequence_number}</span> {op.operation_name} (
+                              {op.eligible_machine_ids?.join(', ') || 'N/A'})
+                            </span>
+                            {idx < prod.routing_operations.length - 1 && (
+                              <ArrowRight size={12} color="var(--secondary)" />
+                            )}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+                          No operations defined
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="product-card-actions">
+                    <Button
+                      variant="outline"
+                      icon={<Pencil size={13} />}
+                      onClick={() => openProductModal(prod)}
+                    >
+                      Edit routing
+                    </Button>
+                    <Button
+                      variant="quiet"
+                      onClick={() => {
+                        if (prod.is_active) {
+                          if (window.confirm(`Deactivate product ${prod.name}?`)) deactivateProduct(prod.product_id)
+                        } else {
+                          updateProduct(prod.product_id, { ...prod, is_active: true })
+                        }
+                      }}
+                    >
+                      {prod.is_active ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {filteredProducts.length === 0 && (
+              <EmptyState
+                icon={Package}
+                title="No products found"
+                description="Try changing the category or search keyword."
+              />
+            )}
+
+            <div className="table-foot">
+              <span>{filteredProducts.length} products listed</span>
+              <span>Centralized engineering route definitions</span>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* ======================================================================
+          PART 4: POLISHED ORDER DETAILS DRAWER
+          ====================================================================== */}
+      {drawerOpen && (
+        <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)}>
+          <div className="order-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header">
+              <div className="drawer-header-left">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)' }}>
+                    {activeOrderDetails?.job_id}
+                  </span>
+                  <span className="badge badge-neutral" style={{ fontSize: 9 }}>
+                    {activeOrderDetails?.product_category || 'Industrial Component'}
+                  </span>
+                </div>
+                <div className="drawer-title-row">
+                  <h2 style={{ fontSize: 18, margin: '4px 0 0', letterSpacing: '-0.03em' }}>
+                    {activeOrderDetails?.product_name}
+                  </h2>
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Customer: <strong>{activeOrderDetails?.customer_name}</strong>
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {activeOrderDetails && <PriorityBadge value={activeOrderDetails.priority as Priority} />}
+                <button
+                  className="icon-btn"
+                  onClick={() => setDrawerOpen(false)}
+                  style={{ borderRadius: 6 }}
+                  title="Close drawer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="drawer-body">
+              {drawerLoading ? (
+                <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--muted)' }}>
+                  <RefreshCw className="spin" size={24} style={{ margin: '0 auto 12px' }} />
+                  <p>Loading live schedule and production route...</p>
+                </div>
+              ) : activeOrderDetails ? (
+                <>
+                  {/* Order Information Grid */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--secondary)', marginBottom: 8 }}>
+                      Order Information & Commitments
+                    </div>
+                    <div className="order-info-grid">
+                      <div className="order-info-item">
+                        <span>Production Quantity</span>
+                        <strong>{activeOrderDetails.quantity.toLocaleString()} units</strong>
+                      </div>
+                      <div className="order-info-item">
+                        <span>Risk & Delivery Status</span>
+                        <div>
+                          <span
+                            className={`badge badge-${activeOrderDetails.risk_status === 'Delayed' ? 'danger' : activeOrderDetails.risk_status.includes('Recovered') ? 'warning' : 'success'}`}
+                          >
+                            <span className="badge-dot" />
+                            {activeOrderDetails.risk_status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="order-info-item">
+                        <span>Order Registration Date</span>
+                        <strong>{shortDate(activeOrderDetails.order_date)}</strong>
+                      </div>
+                      <div className="order-info-item">
+                        <span>Delivery Deadline</span>
+                        <strong className={activeOrderDetails.status === 'Delayed' ? 'text-danger' : ''}>
+                          {shortDate(activeOrderDetails.deadline)}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Production Progress Card */}
+                  <div className="progress-card">
+                    <div className="progress-header">
+                      <span>Production Progress</span>
+                      <strong>{activeOrderDetails.progress_pct}%</strong>
+                    </div>
+                    <div className="progress-bar-track">
+                      <div
+                        className="progress-bar-fill"
+                        style={{ width: `${Math.max(5, activeOrderDetails.progress_pct)}%` }}
+                      />
+                    </div>
+                    <div className="progress-stats-row">
+                      <span>
+                        Completed: <strong>{activeOrderDetails.completed_operations}</strong>
+                      </span>
+                      <span>
+                        Running: <strong>{activeOrderDetails.running_operations}</strong>
+                      </span>
+                      <span>
+                        Pending: <strong>{activeOrderDetails.pending_operations}</strong>
+                      </span>
+                      <span>
+                        Total Steps: <strong>{activeOrderDetails.total_operations}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Production Route Visualization */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--secondary)' }}>
+                        Production Route Sequence
+                      </div>
+                      <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                        Connected Operation Timeline
+                      </span>
+                    </div>
+
+                    <div className="timeline-container">
+                      {activeOrderDetails.routing_operations.map((op, idx) => (
+                        <div
+                          className={`timeline-step-card ${op.status === 'Running' || op.status === 'Ongoing' ? 'active' : ''}`}
+                          key={op.operation_id || idx}
+                        >
+                          <div className="timeline-step-header">
+                            <div className="timeline-step-title">
+                              <span className="timeline-step-num">0{op.sequence_number}</span>
+                              <strong>{op.operation_name}</strong>
+                              <span className="machine-tag" style={{ marginLeft: 4 }}>
+                                {op.assigned_machine}
+                              </span>
+                            </div>
+                            <StatusBadge value={op.status} />
+                          </div>
+
+                          {/* Reassignment Highlight */}
+                          {op.is_reassigned && op.previous_machine && (
+                            <div className="reassignment-alert-pill">
+                              <AlertTriangle size={13} />
+                              <span>
+                                Machine reassigned from <strong>{op.previous_machine}</strong> → <strong>{op.assigned_machine}</strong>
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="timeline-step-details">
+                            <div className="timeline-detail-col">
+                              <span>Machine Cell</span>
+                              <strong>{op.assigned_machine_name || op.assigned_machine}</strong>
+                            </div>
+                            <div className="timeline-detail-col">
+                              <span>Duration</span>
+                              <strong>
+                                {op.processing_time} hrs ({op.duration_basis || 'fixed'})
+                              </strong>
+                            </div>
+                            <div className="timeline-detail-col">
+                              <span>Planned Schedule</span>
+                              <strong>
+                                {op.planned_start !== undefined && op.planned_end !== undefined
+                                  ? `${floatToTime(op.planned_start || 0)} – ${floatToTime(op.planned_end || 0)}`
+                                  : 'Awaiting solver run'}
+                              </strong>
+                            </div>
+                            <div className="timeline-detail-col">
+                              <span>Eligible Machines</span>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
+                                {op.eligible_machine_ids?.map((mid) => (
+                                  <span key={mid} style={{ fontSize: 9, padding: '1px 4px', background: '#eef3f0', borderRadius: 3 }}>
+                                    {mid}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div className="drawer-footer">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDrawerOpen(false)
+                  navigate('/rescheduling')
+                }}
+                icon={<GitBranch size={14} />}
+              >
+                View on Gantt schedule
+              </Button>
+              <Button onClick={() => setDrawerOpen(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================================
+          PART 3: REDESIGNED ADD NEW ORDER MODAL WITH ROUTING PREVIEW
+          ====================================================================== */}
+      <Modal
+        open={addOrderModalOpen}
+        onClose={() => setAddOrderModalOpen(false)}
+        title="Add Customer Order"
+        subtitle="Select a manufactured product from the catalog to inherit its verified sequential routing."
+        wide
+      >
+        <form onSubmit={handleSaveOrder}>
+          <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto', paddingRight: 4 }}>
+            {/* Section A: Customer Order Details */}
+            <div className="modal-section-title">SECTION A — CUSTOMER & PRODUCT COMMITMENT</div>
+            <div className="form-grid">
+              <TextField
+                label="Customer name"
+                value={orderForm.customerName}
+                onChange={(val) => setOrderForm({ ...orderForm, customerName: val })}
+                placeholder="e.g. Mahindra Precision"
+              />
+              <div className="field">
+                <span>Select product from catalog</span>
+                <div className="select-wrap">
+                  <select
+                    value={orderForm.productId}
+                    onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value })}
+                  >
+                    {products
+                      .filter((p) => p.is_active)
+                      .map((p) => (
+                        <option key={p.product_id} value={p.product_id}>
+                          {p.name} ({p.product_id} · {p.category})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              <TextField
+                label="Production quantity (units)"
+                value={orderForm.quantity}
+                onChange={(val) => setOrderForm({ ...orderForm, quantity: Number(val) })}
+                type="number"
+              />
+              <SelectField
+                label="Priority commitment"
+                value={orderForm.priority}
+                onChange={(val) => setOrderForm({ ...orderForm, priority: val as Priority })}
+                options={['Urgent', 'High', 'Medium', 'Low']}
+              />
+              <TextField
+                label="Order date"
+                value={orderForm.orderDate}
+                onChange={(val) => setOrderForm({ ...orderForm, orderDate: val })}
+                type="date"
+              />
+              <TextField
+                label="Delivery deadline"
+                value={orderForm.deadline}
+                onChange={(val) => setOrderForm({ ...orderForm, deadline: val })}
+                type="date"
+              />
+            </div>
+
+            {/* Section B: Automatic Production Routing Review */}
+            <div className="modal-section-title" style={{ marginTop: 20 }}>
+              SECTION B — AUTOMATIC PRODUCTION ROUTING PREVIEW
+            </div>
+
+            {selectedProductForOrder ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Live Sequence Strip */}
+                <div className="live-preview-strip">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <Layers size={13} color="var(--primary)" />
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--secondary)' }}>
+                      Predefined Sequence Flow
+                    </span>
+                  </div>
+                  <div className="route-sequence-chips">
+                    {selectedProductForOrder.routing_operations.map((op, idx) => (
+                      <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span className="route-chip">
+                          0{op.sequence_number} {op.operation_name} ({op.eligible_machine_ids?.join(', ')})
+                        </span>
+                        {idx < selectedProductForOrder.routing_operations.length - 1 && (
+                          <ArrowRight size={12} color="var(--secondary)" />
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Operations List Cards */}
+                <div className="routing-container" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                  {selectedProductForOrder.routing_operations.map((op, idx) => {
+                    const durHours =
+                      op.duration_basis === 'per_unit'
+                        ? op.processing_time * (orderForm.quantity || 1)
+                        : op.processing_time
+                    return (
+                      <div className="routing-step-card" key={idx} style={{ padding: '10px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span className="routing-step-badge">0{op.sequence_number}</span>
+                          <div>
+                            <strong style={{ fontSize: 13 }}>{op.operation_name}</strong>
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                              Duration: <strong>{op.processing_time} hrs</strong> ({op.duration_basis})
+                              {op.duration_basis === 'per_unit' && (
+                                <span style={{ color: 'var(--primary)', marginLeft: 4 }}>
+                                  → Total: {durHours.toFixed(1)} hrs for {orderForm.quantity} pcs
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 10, color: 'var(--muted)' }}>Eligible:</span>
+                          {op.eligible_machine_ids?.map((mid) => (
+                            <span key={mid} className="machine-tag">
+                              {mid}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontStyle: 'italic' }}>
+                Please select a product above to preview its routing template.
+              </div>
+            )}
+          </div>
+
+          <div className="modal-actions">
+            <Button variant="outline" onClick={() => setAddOrderModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<Plus size={15} />}>
+              Create order with routing
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ======================================================================
+          PART 7: PRODUCT & ROUTING TEMPLATE EDITOR MODAL
+          ====================================================================== */}
+      <Modal
+        open={productModal !== null}
+        onClose={() => setProductModal(null)}
+        title={productModal === 'edit' ? `Edit Product: ${productForm.product_id}` : 'Create New Product Template'}
+        subtitle="Define standardized manufacturing routings, operations sequence, and eligible machine cells."
+        wide
+      >
+        <form onSubmit={handleSaveProduct}>
+          <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto', paddingRight: 4 }}>
+            <div className="modal-section-title">PRODUCT SPECIFICATIONS</div>
+            <div className="form-grid">
+              <TextField
+                label="Product ID"
+                value={productForm.product_id}
+                onChange={(val) => setProductForm({ ...productForm, product_id: val.toUpperCase() })}
+                placeholder="e.g. PROD-011"
+                disabled={productModal === 'edit'}
+              />
+              <TextField
+                label="Product name"
+                value={productForm.name}
+                onChange={(val) => setProductForm({ ...productForm, name: val })}
+                placeholder="e.g. Hydraulic Cylinder End Cap"
+              />
+              <TextField
+                label="Category"
+                value={productForm.category}
+                onChange={(val) => setProductForm({ ...productForm, category: val })}
+                placeholder="e.g. Fluid Power Components"
+              />
+              <TextField
+                label="Description"
+                value={productForm.description}
+                onChange={(val) => setProductForm({ ...productForm, description: val })}
+                placeholder="Technical notes or alloy composition..."
+              />
+            </div>
+
+            <div
+              className="modal-section-title"
+              style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+            >
+              <span>MANUFACTURING ROUTING OPERATIONS</span>
+              <Button
+                variant="outline"
+                icon={<Plus size={13} />}
+                onClick={() => {
+                  const seq = productForm.routing_operations.length + 1
+                  const defaultMch = realMachines[0]?.id || 'CNC-1'
+                  setProductForm({
+                    ...productForm,
+                    routing_operations: [
+                      ...productForm.routing_operations,
+                      {
+                        operation_name: `Operation ${seq}`,
+                        sequence_number: seq,
+                        processing_time: 2.0,
+                        duration_basis: 'fixed',
+                        eligible_machine_ids: [defaultMch],
+                      },
+                    ],
+                  })
+                }}
+              >
+                Add operation
+              </Button>
+            </div>
+
+            <div className="routing-container">
+              {productForm.routing_operations.map((op, idx) => (
+                <div className="routing-step-card" key={idx}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="routing-step-badge">0{op.sequence_number}</span>
+                      <strong style={{ fontSize: 13 }}>Operation Step #{op.sequence_number}</strong>
+                    </div>
+                    {productForm.routing_operations.length > 1 && (
+                      <button
+                        type="button"
+                        className="routing-step-delete"
+                        onClick={() => {
+                          const updated = productForm.routing_operations
+                            .filter((_, i) => i !== idx)
+                            .map((item, newIdx) => ({ ...item, sequence_number: newIdx + 1 }))
+                          setProductForm({ ...productForm, routing_operations: updated })
+                        }}
+                        title="Delete operation"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="form-grid" style={{ marginTop: 10 }}>
+                    <TextField
+                      label="Operation name"
+                      value={op.operation_name}
+                      onChange={(val) => {
+                        const copy = [...productForm.routing_operations]
+                        copy[idx] = { ...copy[idx], operation_name: val }
+                        setProductForm({ ...productForm, routing_operations: copy })
+                      }}
+                      placeholder="e.g. Turning, Milling, Grinding"
+                    />
+
+                    <TextField
+                      label="Processing time (hours)"
+                      value={op.processing_time}
+                      onChange={(val) => {
+                        const copy = [...productForm.routing_operations]
+                        copy[idx] = { ...copy[idx], processing_time: Number(val) }
+                        setProductForm({ ...productForm, routing_operations: copy })
+                      }}
+                      type="number"
+                    />
+
+                    <div className="field">
+                      <span>Duration basis</span>
+                      <div className="select-wrap">
+                        <select
+                          value={op.duration_basis || 'fixed'}
+                          onChange={(e) => {
+                            const copy = [...productForm.routing_operations]
+                            copy[idx] = { ...copy[idx], duration_basis: e.target.value as any }
+                            setProductForm({ ...productForm, routing_operations: copy })
+                          }}
+                        >
+                          <option value="fixed">Fixed per operation</option>
+                          <option value="per_unit">Per unit produced</option>
+                          <option value="per_batch">Per production batch</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="field">
+                      <span>Required material (optional)</span>
+                      <div className="select-wrap">
+                        <select
+                          value={op.required_material_id || ''}
+                          onChange={(e) => {
+                            const copy = [...productForm.routing_operations]
+                            copy[idx] = { ...copy[idx], required_material_id: e.target.value || null }
+                            setProductForm({ ...productForm, routing_operations: copy })
+                          }}
+                        >
+                          <option value="">None / Not required</option>
+                          {materials.map((m) => (
+                            <option key={m.material_id} value={m.material_id}>
+                              {m.name} ({m.material_id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Machine multi-select checkboxes */}
+                  <div style={{ marginTop: 10 }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: '#7b8782', display: 'block' }}>
+                      Eligible Machine Cells (Select all capable):
+                    </span>
+                    <div className="machine-checkbox-group">
+                      {realMachines.map((mch) => {
+                        const isSelected = op.eligible_machine_ids?.includes(mch.id)
+                        return (
+                          <label
+                            key={mch.id}
+                            className={`machine-checkbox-label ${isSelected ? 'selected' : ''}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                const copy = [...productForm.routing_operations]
+                                const currentMchs = copy[idx].eligible_machine_ids || []
+                                if (isSelected) {
+                                  if (currentMchs.length > 1) {
+                                    copy[idx].eligible_machine_ids = currentMchs.filter((id) => id !== mch.id)
+                                  } else {
+                                    pushToast('Requirement', 'Each operation must have at least one machine.', 'warning')
+                                  }
+                                } else {
+                                  copy[idx].eligible_machine_ids = [...currentMchs, mch.id]
+                                }
+                                setProductForm({ ...productForm, routing_operations: copy })
+                              }}
+                            />
+                            {isSelected ? <Check size={12} color="var(--primary)" /> : null}
+                            <span>
+                              {mch.id} · {mch.type}
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <Button variant="outline" onClick={() => setProductModal(null)}>
+              Cancel
+            </Button>
+            <Button type="submit">
+              {productModal === 'edit' ? 'Save product changes' : 'Create product routing'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  )
 }
+
 
 const emptyMachine: Omit<Machine, 'utilization' | 'task'> = { id: '', name: '', type: 'CNC Lathe', capacity: 16, status: 'Available', workingHours: '06:00 – 22:00' }
 export function MachinesPage() {

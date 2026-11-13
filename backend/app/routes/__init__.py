@@ -1,5 +1,6 @@
 from .machines import router as machines_router
 from .jobs import router as jobs_router
+from .products import router as products_router
 from .disruptions import router as disruptions_router
 from .scheduling import router as scheduling_router
 from .analytics import router as analytics_router

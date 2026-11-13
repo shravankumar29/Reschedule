@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { factorySettings, initialDisruptions, initialMachines, initialOrders, initialSchedule } from '../data/mockData'
-import type { Disruption, FactorySettings, Machine, Order, ScheduleTask, Toast } from '../types'
+import type { Disruption, FactorySettings, Machine, Order, ScheduleTask, Toast, Product, ProductOperation, OrderDetailsData } from '../types'
 import {
   api,
   floatToTime,
@@ -66,7 +66,7 @@ interface AppContextValue {
   setAnalyticsRange: (range: string) => void
   lastUpdated: Date | null
   refreshAnalytics: (range?: string) => Promise<void>
-  addOrder: (order: Omit<Order, 'id' | 'status'> & { status?: Order['status'] }) => void
+  addOrder: (order: Omit<Order, 'id' | 'status'> & { status?: Order['status']; productId?: string; customerName?: string; operations?: any[] }) => Promise<void>
   updateOrder: (order: Order) => void
   updateOrderStatus: (id: string, status: Order['status']) => void
   deleteOrder: (id: string) => void
@@ -93,6 +93,13 @@ interface AppContextValue {
   receiveMaterialDelayAction: (id: string, payload: { received_quantity?: number; actual_arrival_time?: string; notes?: string }) => Promise<void>
   createRushOrderAction: (payload: any) => Promise<any>
   scheduleRushOrderAction: (rushOrderId: string) => Promise<void>
+  // Product Catalog & Routing
+  products: Product[]
+  refreshProducts: () => Promise<void>
+  addProduct: (data: any) => Promise<any>
+  updateProduct: (id: string, data: any) => Promise<any>
+  deactivateProduct: (id: string) => Promise<void>
+  fetchOrderDetails: (jobId: string) => Promise<OrderDetailsData>
   dismissToast: (id: string) => void
   pushToast: (title: string, message: string, tone?: Toast['tone']) => void
   resetDemoData: () => Promise<void>
@@ -206,6 +213,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [materialDelays, setMaterialDelays] = useState<BackendDisruption[]>([])
   const [rushOrders, setRushOrders] = useState<RushOrderResponse[]>([])
   const [materials, setMaterials] = useState<BackendMaterial[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+
+  const refreshProducts = async () => {
+    try {
+      const list = await api.getProducts()
+      if (Array.isArray(list)) setProducts(list)
+    } catch (err) {
+      console.warn('Failed to load products:', err)
+    }
+  }
+
+  const addProduct = async (data: any) => {
+    const res = await api.createProduct(data)
+    await refreshProducts()
+    pushToast('Product created', `${res.name} (${res.product_id}) added to catalog.`, 'success')
+    return res
+  }
+
+  const updateProduct = async (id: string, data: any) => {
+    const res = await api.updateProduct(id, data)
+    await refreshProducts()
+    pushToast('Product updated', `${res.name} details saved.`, 'success')
+    return res
+  }
+
+  const deactivateProduct = async (id: string) => {
+    await api.deactivateProduct(id)
+    await refreshProducts()
+    pushToast('Product deactivated', `Product ${id} has been deactivated.`, 'info')
+  }
+
+  const fetchOrderDetails = async (jobId: string): Promise<OrderDetailsData> => {
+    return await api.getJobDetails(jobId)
+  }
 
   const refreshDisruptionsData = async () => {
     try {
@@ -424,11 +465,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function loadBackendData() {
       try {
-        const [backendMachines, backendJobs, backendDisruptions] = await Promise.all([
+        const [backendMachines, backendJobs, backendDisruptions, backendProducts] = await Promise.all([
           api.getMachines().catch(() => null),
           api.getJobs().catch(() => null),
           api.getDisruptions().catch(() => null),
+          api.getProducts().catch(() => null),
         ])
+
+        if (backendProducts && Array.isArray(backendProducts)) {
+          setProducts(backendProducts)
+        }
 
         if (backendMachines && backendMachines.length > 0) {
           const mappedMachines: Machine[] = backendMachines.map((m) => ({
@@ -449,6 +495,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const mappedOrders: Order[] = backendJobs.map((j) => ({
             id: j.job_id,
             product: j.product_name,
+            productId: j.product_id,
+            customerName: j.customer_name,
             quantity: j.quantity,
             orderDate: j.order_date,
             deadline: j.deadline,
@@ -493,7 +541,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loadBackendData()
   }, [])
 
-  const addOrder = async (order: Omit<Order, 'id' | 'status'> & { status?: Order['status'] }) => {
+  const addOrder = async (order: Omit<Order, 'id' | 'status'> & { status?: Order['status']; productId?: string; customerName?: string; operations?: any[] }) => {
     // Generate a collision-safe ID: check both local state and backend
     let maxNum = 100
     for (const o of orders) {
@@ -530,25 +578,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const backupMachine = allMachineIds.find((mid) => mid !== primaryMachine)
       if (backupMachine) eligible.push(backupMachine)
 
+      const ops = (order.operations && order.operations.length > 0)
+        ? order.operations
+        : (!order.productId ? [
+            {
+              operation_name: `${order.product} Machining`,
+              processing_time: order.estimatedHours || 4.0,
+              eligible_machine_ids: eligible,
+              sequence_number: 1,
+            },
+          ] : [])
+
       await api.createJob({
         job_id: id,
-        customer_name: 'Custom Order',
+        product_id: order.productId,
+        customer_name: order.customerName || 'Customer Order',
         product_name: order.product,
         quantity: order.quantity,
         priority: order.priority === 'High' ? 'High' : order.priority === 'Medium' ? 'Medium' : 'Low',
         order_date: order.orderDate,
         deadline: order.deadline,
-        operations: [
-          {
-            operation_name: `${order.product} Machining`,
-            processing_time: order.estimatedHours || 4.0,
-            eligible_machine_ids: eligible,
-            sequence_number: 1,
-          },
-        ],
+        operations: ops,
       })
       pushToast('Order saved to database', `${id} (${order.product}) is registered in the production system.`, 'success')
       refreshAnalytics()
+      const updatedJobs = await api.getJobs().catch(() => null)
+      if (updatedJobs) {
+        setOrders(updatedJobs.map((j) => ({
+          id: j.job_id,
+          product: j.product_name,
+          productId: j.product_id,
+          customerName: j.customer_name,
+          quantity: j.quantity,
+          orderDate: j.order_date,
+          deadline: j.deadline,
+          priority: j.priority === 'Urgent' ? 'High' : j.priority,
+          machine: j.operations[0]?.eligible_machine_ids[0] || 'CNC-1',
+          status: j.status,
+          estimatedHours: j.operations.reduce((sum, op) => sum + op.processing_time, 0),
+        })))
+      }
     } catch (err: any) {
       console.warn('Backend job registration error:', err)
       const detail = err?.message || ''
@@ -1138,6 +1207,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     receiveMaterialDelayAction,
     createRushOrderAction,
     scheduleRushOrderAction,
+    // Products & Routing
+    products,
+    refreshProducts,
+    addProduct,
+    updateProduct,
+    deactivateProduct,
+    fetchOrderDetails,
     dismissToast: (id) => setToasts((current) => current.filter((toast) => toast.id !== id)),
     pushToast,
     resetDemoData,

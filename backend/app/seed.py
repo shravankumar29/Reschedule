@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine, Base
 from app.models.machine import Machine
+from app.models.product import Product, ProductOperation
 from app.models.job import Job, Operation
 from app.models.material import Material, MaterialRequirement
 from app.models.disruption import Disruption
@@ -163,6 +164,140 @@ def seed_materials(db: Session):
             db.add(m)
     db.commit()
     print(f"Seeded {len(materials)} materials.")
+
+
+def seed_products(db: Session):
+    products = [
+        {
+            "product_id": "PROD-001",
+            "name": "Hydraulic Valve Housing",
+            "category": "Fluid Power Components",
+            "description": "High-pressure cast ductile iron valve housing with precision bore and milled port faces.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"], "required_material_id": "MAT-001", "required_material_qty": 48.0},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-002",
+            "name": "Drive Shaft Coupling",
+            "category": "Drivetrain & Transmission",
+            "description": "Heavy-duty forged carbon steel drive coupling with internal splines and ground journal.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 4.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"], "required_material_id": "MAT-004", "required_material_qty": 20.0},
+                {"operation_name": "Boring", "sequence_number": 2, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-003",
+            "name": "Precision Gear Ring",
+            "category": "Gearing & Power",
+            "description": "High-grade alloy steel internal gear ring with CNC milled teeth and finish ground outer diameter.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 3.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"], "required_material_id": "MAT-002", "required_material_qty": 35.0},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-004",
+            "name": "Servo Bracket Assembly",
+            "category": "Robotics & Automation",
+            "description": "Precision milled mounting bracket for industrial servo actuators.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
+                {"operation_name": "Tapping", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1"]},
+                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-005",
+            "name": "Stainless Mount Plate",
+            "category": "Structural & Aerospace",
+            "description": "Corrosion-resistant SS 316L mounting interface plate with multi-hole pattern.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 4.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-2", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-006",
+            "name": "Conveyor Idler Shaft",
+            "category": "Material Handling",
+            "description": "EN8 turned steel shaft for bulk material conveyor rollers.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-007",
+            "name": "Motor End Shield",
+            "category": "Electric Drives",
+            "description": "Die-cast end bell housing with bearing seat and mounting flanges.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Milling", "sequence_number": 2, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
+                {"operation_name": "Finishing", "sequence_number": 3, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-008",
+            "name": "Pump Impeller",
+            "category": "Fluid Power Components",
+            "description": "Balanced high-flow bronze impeller casting with ground bore.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 2.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+        {
+            "product_id": "PROD-009",
+            "name": "Bearing Retainer Cap",
+            "category": "Precision Gearing",
+            "description": "Precision milled retainer cap with oil seal groove.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Milling", "sequence_number": 1, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2"]},
+                {"operation_name": "Drilling", "sequence_number": 2, "processing_time": 1.0, "duration_basis": "fixed", "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-2"]},
+            ],
+        },
+        {
+            "product_id": "PROD-010",
+            "name": "Rotor Shaft Blank",
+            "category": "Electric Drives",
+            "description": "High-torque induction rotor blank with stepped journal diameters.",
+            "is_active": True,
+            "routing_operations": [
+                {"operation_name": "Turning", "sequence_number": 1, "processing_time": 3.5, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Boring", "sequence_number": 2, "processing_time": 2.0, "duration_basis": "fixed", "eligible_machine_ids": ["CNC-1", "CNC-2"]},
+                {"operation_name": "Grinding", "sequence_number": 3, "processing_time": 1.5, "duration_basis": "fixed", "eligible_machine_ids": ["GRIND-1"]},
+            ],
+        },
+    ]
+
+    for p_data in products:
+        if db.query(Product).filter(Product.product_id == p_data["product_id"]).first():
+            continue
+        r_ops = p_data.pop("routing_operations")
+        prod = Product(**p_data)
+        db.add(prod)
+        db.flush()
+        for r in r_ops:
+            db.add(ProductOperation(product_id=prod.product_id, **r))
+    db.commit()
+    print(f"Seeded {len(products)} products with routing templates.")
 
 
 def seed_jobs(db: Session):
@@ -326,6 +461,9 @@ def seed_jobs(db: Session):
         if db.query(Job).filter(Job.job_id == jd["job_id"]).first():
             continue
         ops_data = jd.pop("operations")
+        product_obj = db.query(Product).filter(Product.name == jd["product_name"]).first()
+        if product_obj:
+            jd["product_id"] = product_obj.product_id
         job = Job(**jd)
         db.add(job)
         db.flush()
@@ -356,6 +494,7 @@ def seed_all(reset: bool = True):
     try:
         seed_machines(db)
         seed_materials(db)
+        seed_products(db)
         seed_jobs(db)
         print("Seed complete. Run POST /api/schedule/generate to build the initial schedule.")
     finally:

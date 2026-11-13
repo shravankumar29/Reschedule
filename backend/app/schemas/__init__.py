@@ -1,5 +1,12 @@
 from .machine import MachineCreate, MachineRead, MachineUpdate
 from .job import JobCreate, JobRead, JobUpdate, OperationCreate, OperationRead
+from .product import (
+    ProductCreate,
+    ProductRead,
+    ProductUpdate,
+    ProductOperationCreate,
+    ProductOperationRead,
+)
 from .disruption import (
     DisruptionCreate,
     DisruptionRead,
