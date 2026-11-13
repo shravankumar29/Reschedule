@@ -62,7 +62,7 @@ def run_rescheduling(
         if not target_disruption and requested_mode != "optimization":
             target_disruption = (
                 db.query(Disruption)
-                .filter(Disruption.status.in_(["Open", "Analyzed"]))
+                .filter(Disruption.status.in_(["Open", "Analyzed", "Reported", "Under Repair", "Awaiting Material", "Awaiting Scheduling"]))
                 .order_by(Disruption.id.desc())
                 .first()
             )

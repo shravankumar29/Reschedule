@@ -10,6 +10,10 @@ import {
   type BackendImpact,
   type MachineUtilizationItem,
   type ProductionOutputChart,
+  type BackendDisruption,
+  type BackendMaterial,
+  type DisruptionWorkspaceSummary,
+  type RushOrderResponse,
 } from '../api/client'
 
 interface AppContextValue {
@@ -76,6 +80,19 @@ interface AppContextValue {
   approveSchedule: () => Promise<void>
   recalculateSchedule: (options?: { prioritize: boolean; delivery: boolean; idle: boolean; overtime: boolean; mode?: 'optimization' | 'recovery' | 'auto' }) => Promise<void>
   updateSettings: (settings: FactorySettings) => void
+  // Three-Category Disruption Workspace
+  disruptionSummary: DisruptionWorkspaceSummary | null
+  breakdowns: BackendDisruption[]
+  materialDelays: BackendDisruption[]
+  rushOrders: RushOrderResponse[]
+  materials: BackendMaterial[]
+  refreshDisruptionsData: () => Promise<void>
+  reportBreakdownAction: (payload: { machine_id: string; description: string; breakdown_start?: string; estimated_repair_hours?: number; severity?: string; notes?: string }) => Promise<void>
+  recoverBreakdownAction: (id: string, payload: { recovery_notes?: string; actual_recovery_time?: string }) => Promise<void>
+  reportMaterialDelayAction: (payload: { material_id: string; delay_reason?: string; supplier?: string; required_quantity?: number; available_quantity?: number; expected_arrival_date?: string; expected_arrival_time?: string; severity?: string }) => Promise<void>
+  receiveMaterialDelayAction: (id: string, payload: { received_quantity?: number; actual_arrival_time?: string; notes?: string }) => Promise<void>
+  createRushOrderAction: (payload: any) => Promise<any>
+  scheduleRushOrderAction: (rushOrderId: string) => Promise<void>
   dismissToast: (id: string) => void
   pushToast: (title: string, message: string, tone?: Toast['tone']) => void
   resetDemoData: () => Promise<void>
@@ -183,6 +200,190 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedOperationForEdit, setSelectedOperationForEdit] = useState<ScheduleTask | null>(null)
   const [proposalValidation, setProposalValidation] = useState<any | null>(null)
 
+  // Three-Category Disruption Workspace state
+  const [disruptionSummary, setDisruptionSummary] = useState<DisruptionWorkspaceSummary | null>(null)
+  const [breakdowns, setBreakdowns] = useState<BackendDisruption[]>([])
+  const [materialDelays, setMaterialDelays] = useState<BackendDisruption[]>([])
+  const [rushOrders, setRushOrders] = useState<RushOrderResponse[]>([])
+  const [materials, setMaterials] = useState<BackendMaterial[]>([])
+
+  const refreshDisruptionsData = async () => {
+    try {
+      const [sum, bds, mds, rush, mats] = await Promise.all([
+        api.getDisruptionsSummary().catch(() => null),
+        api.listBreakdowns().catch(() => []),
+        api.listMaterialDelays().catch(() => []),
+        api.listRushOrders().catch(() => []),
+        api.listMaterials().catch(() => []),
+      ])
+      if (sum) setDisruptionSummary(sum)
+      if (bds) setBreakdowns(bds)
+      if (mds) setMaterialDelays(mds)
+      if (rush) setRushOrders(rush)
+      if (mats) setMaterials(mats)
+    } catch (err) {
+      console.warn('Failed to load disruptions workspace data:', err)
+    }
+  }
+
+  const reportBreakdownAction = async (payload: {
+    machine_id: string
+    description: string
+    breakdown_start?: string
+    estimated_repair_hours?: number
+    severity?: string
+    notes?: string
+  }) => {
+    setIsLoading(true)
+    try {
+      await api.reportBreakdown(payload)
+      pushToast('Breakdown reported', `Machine ${payload.machine_id} marked offline. Repair estimated at ${payload.estimated_repair_hours || 4}h.`, 'warning')
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+      const updatedMachines = await api.getMachines().catch(() => null)
+      if (updatedMachines) {
+        setMachines(updatedMachines.map((m) => ({
+          id: m.machine_id,
+          name: m.name,
+          type: m.machine_type,
+          capacity: m.working_end_hour - m.working_start_hour,
+          utilization: m.utilization || 0,
+          status: !m.available ? 'Breakdown' : m.utilization > 0 ? 'Running' : 'Available',
+          task: m.current_task || (m.available ? 'Available for assignment' : 'Offline / Breakdown'),
+          workingHours: `${String(m.working_start_hour).padStart(2, '0')}:00 – ${String(m.working_end_hour).padStart(2, '0')}:00`,
+        })))
+      }
+    } catch (err: any) {
+      pushToast('Failed to report breakdown', err?.message || 'Error reporting breakdown', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const recoverBreakdownAction = async (id: string, payload: { recovery_notes?: string; actual_recovery_time?: string }) => {
+    setIsLoading(true)
+    try {
+      await api.recoverBreakdown(id, payload)
+      pushToast('Machine recovered', `Breakdown ${id} resolved. Machine returned to service.`, 'success')
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+      const updatedMachines = await api.getMachines().catch(() => null)
+      if (updatedMachines) {
+        setMachines(updatedMachines.map((m) => ({
+          id: m.machine_id,
+          name: m.name,
+          type: m.machine_type,
+          capacity: m.working_end_hour - m.working_start_hour,
+          utilization: m.utilization || 0,
+          status: !m.available ? 'Breakdown' : m.utilization > 0 ? 'Running' : 'Available',
+          task: m.current_task || (m.available ? 'Available for assignment' : 'Offline / Breakdown'),
+          workingHours: `${String(m.working_start_hour).padStart(2, '0')}:00 – ${String(m.working_end_hour).padStart(2, '0')}:00`,
+        })))
+      }
+    } catch (err: any) {
+      pushToast('Failed to recover machine', err?.message || 'Error updating recovery', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const reportMaterialDelayAction = async (payload: {
+    material_id: string
+    delay_reason?: string
+    supplier?: string
+    required_quantity?: number
+    available_quantity?: number
+    expected_arrival_date?: string
+    expected_arrival_time?: string
+    severity?: string
+  }) => {
+    setIsLoading(true)
+    try {
+      await api.reportMaterialDelay(payload)
+      pushToast('Material delay recorded', `Delay reported for ${payload.material_id}. Shortage identified.`, 'warning')
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+    } catch (err: any) {
+      pushToast('Failed to report material delay', err?.message || 'Error recording delay', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const receiveMaterialDelayAction = async (id: string, payload: { received_quantity?: number; actual_arrival_time?: string; notes?: string }) => {
+    setIsLoading(true)
+    try {
+      await api.receiveMaterialDelay(id, payload)
+      pushToast('Material received', `Receipt confirmed for disruption ${id}. Inventory replenished.`, 'success')
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+    } catch (err: any) {
+      pushToast('Failed to record receipt', err?.message || 'Error recording receipt', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const createRushOrderAction = async (payload: any) => {
+    setIsLoading(true)
+    try {
+      const res = await api.createRushOrder(payload)
+      pushToast('Rush order added', `Order ${res.rush_order_id} created with Urgent priority.`, 'success')
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+      const backendJobs = await api.getJobs().catch(() => null)
+      if (backendJobs) {
+        setOrders(backendJobs.map((j) => ({
+          id: j.job_id,
+          product: j.product_name,
+          quantity: j.quantity,
+          orderDate: j.order_date,
+          deadline: j.deadline,
+          priority: j.priority === 'Urgent' ? 'High' : j.priority,
+          machine: j.operations[0]?.eligible_machine_ids[0] || 'CNC-1',
+          status: j.status,
+          estimatedHours: j.operations.reduce((sum, op) => sum + op.processing_time, 0),
+        })))
+      }
+      return res
+    } catch (err: any) {
+      pushToast('Failed to create rush order', err?.message || 'Error creating rush order', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const scheduleRushOrderAction = async (rushOrderId: string) => {
+    setIsLoading(true)
+    try {
+      const res = await api.scheduleRushOrder(rushOrderId)
+      if (res && res.operations) {
+        const tasks = mapBackendOpsToTasks(res.operations, orders)
+        setProposedSchedule(tasks)
+        setProposedScheduleId(res.schedule_id)
+        setProposedSolverStatus(res.solver_status)
+        setProposedMode('recovery')
+        setProposedHasChanges(res.has_changes ?? true)
+        setProposedChangesCount(res.changes_count ?? 1)
+        if (res.impact) setImpactData(res.impact)
+        if (res.explanations) setExplanations(res.explanations)
+        pushToast('Rush order scheduled', `Recovery schedule generated for rush order ${rushOrderId}.`, 'success')
+      }
+      await refreshDisruptionsData()
+      await refreshAnalytics()
+    } catch (err: any) {
+      pushToast('Failed to schedule rush order', err?.message || 'Error scheduling rush order', 'error')
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const refreshAnalytics = async (range = analyticsRange) => {
     try {
       const [overview, util, prod] = await Promise.all([
@@ -282,8 +483,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setSchedule(tasks)
         }
 
-        // Refresh live analytics from DB
+        // Refresh live analytics and disruptions workspace from DB
         await refreshAnalytics()
+        await refreshDisruptionsData()
       } catch (err) {
         console.warn('Backend sync failed, using cached state:', err)
       }
@@ -923,6 +1125,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     approveSchedule,
     recalculateSchedule,
     updateSettings: (next) => { setSettings(next); pushToast('Settings saved', 'Factory preferences are up to date.') },
+    // Disruption Workspace
+    disruptionSummary,
+    breakdowns,
+    materialDelays,
+    rushOrders,
+    materials,
+    refreshDisruptionsData,
+    reportBreakdownAction,
+    recoverBreakdownAction,
+    reportMaterialDelayAction,
+    receiveMaterialDelayAction,
+    createRushOrderAction,
+    scheduleRushOrderAction,
     dismissToast: (id) => setToasts((current) => current.filter((toast) => toast.id !== id)),
     pushToast,
     resetDemoData,

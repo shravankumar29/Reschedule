@@ -10,6 +10,8 @@ from .routes import (
     scheduling_router,
     analytics_router,
     admin_router,
+    materials_router,
+    rush_orders_router,
 )
 
 # Create all tables on startup (dev mode; use Alembic for production)
@@ -35,6 +37,8 @@ app.include_router(disruptions_router)
 app.include_router(scheduling_router)
 app.include_router(analytics_router)
 app.include_router(admin_router)
+app.include_router(materials_router)
+app.include_router(rush_orders_router)
 
 
 @app.get("/")

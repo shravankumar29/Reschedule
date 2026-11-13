@@ -27,8 +27,10 @@ export function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const current = navItems.find((item) => item.path === location.pathname) ?? navItems[0]
-  const { toasts, dismissToast, disruptions } = useApp()
-  const openDisruptions = disruptions.filter((item) => item.status === 'Open').length
+  const { toasts, dismissToast, disruptions, disruptionSummary } = useApp()
+  const openDisruptions = disruptionSummary
+    ? (disruptionSummary.active_machine_breakdowns + disruptionSummary.active_material_delays + disruptionSummary.open_rush_orders)
+    : disruptions.filter((item) => item.status === 'Open' || item.status === 'Reported' || item.status === 'Under Repair' || item.status === 'Awaiting Material' || item.status === 'Awaiting Scheduling').length
 
   return <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar">

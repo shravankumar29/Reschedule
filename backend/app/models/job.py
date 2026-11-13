@@ -1,5 +1,5 @@
 """SQLAlchemy models – Job and Operation."""
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, JSON
+from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import relationship
 from ..database import Base
 
@@ -16,6 +16,7 @@ class Job(Base):
     order_date = Column(String, nullable=False)   # ISO date string YYYY-MM-DD
     deadline = Column(String, nullable=False)     # ISO date string YYYY-MM-DD
     status = Column(String, default="Pending")    # Pending | In Production | Completed | Delayed
+    is_rush_order = Column(Boolean, default=False)
 
     operations = relationship("Operation", back_populates="job", cascade="all, delete-orphan", order_by="Operation.sequence_number")
 
@@ -32,5 +33,8 @@ class Operation(Base):
     sequence_number = Column(Integer, nullable=False)
     status = Column(String, default="Pending")  # Pending | Scheduled | Ongoing | Completed | Delayed
 
-    job = relationship("Job", back_populates="operations")
+    # Optional material requirement on operation level
+    required_material_id = Column(String, nullable=True)
+    required_material_qty = Column(Float, nullable=True)
 
+    job = relationship("Job", back_populates="operations")

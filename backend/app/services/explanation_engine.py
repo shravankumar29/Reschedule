@@ -59,7 +59,7 @@ def get_explanations(db: Session, schedule_id: Optional[str] = None) -> List[Dic
         breakdown = next(
             (
                 d for d in active_breakdowns
-                if d.resource and (d.resource.split(" · ")[0].strip() == from_m or d.resource == from_m)
+                if (d.machine_id == from_m) or (d.resource and (d.resource.split(" · ")[0].strip() == from_m or d.resource == from_m))
             ),
             None,
         )
@@ -97,14 +97,26 @@ def get_explanations(db: Session, schedule_id: Optional[str] = None) -> List[Dic
         job_id = op["job_id"]
         job = db.query(Job).filter(Job.job_id == job_id).first()
         job_name = job.product_name if job else job_id
+        orig_m = op.get("original_machine")
+        bd_match = next(
+            (
+                d for d in active_breakdowns
+                if (d.machine_id == orig_m) or (d.resource and (d.resource.split(" · ")[0].strip() == orig_m or d.resource == orig_m))
+            ),
+            None,
+        )
+        if bd_match and shift > 0:
+            reason_suffix = f"due to {orig_m} breakdown downtime starting at {bd_match.breakdown_start or '10:00'} ({bd_match.estimated_repair_hours or 3}h window)."
+        else:
+            reason_suffix = "to optimize workflow sequencing and eliminate machine idle time."
+
         explanations.append({
             "type": "time_shift",
             "operation_id": op["operation_id"],
             "job_id": job_id,
             "message": (
                 f"Operation {op['operation_id']} for job {job_id} ({job_name}) "
-                f"was {direction} by {abs(shift):.1f} hours to optimize workflow sequencing "
-                "and eliminate machine idle time."
+                f"was {direction} by {abs(shift):.1f} hours {reason_suffix}"
             ),
             "shift_hours": shift,
         })
@@ -121,6 +133,41 @@ def get_explanations(db: Session, schedule_id: Optional[str] = None) -> List[Dic
                 "Capacity constraints across eligible machines limit earlier completion."
             ),
             "delay_hours": delayed["delay_hours"],
+        })
+
+    # --- Material Delays ---
+    active_mat_delays = (
+        db.query(Disruption)
+        .filter(
+            Disruption.disruption_type == "Material Delay",
+            Disruption.status.in_(["Open", "Analyzed", "Reported", "Awaiting Material"]),
+        )
+        .all()
+    )
+    for md in active_mat_delays:
+        explanations.append({
+            "type": "material_delay",
+            "message": (
+                f"Material {md.resource} shortage ({md.shortage_quantity or 0} units). "
+                f"Dependent operations are constrained to start after expected delivery at {md.expected_arrival or '15:00'}."
+            ),
+        })
+
+    # --- Rush Orders ---
+    active_rush = (
+        db.query(Disruption)
+        .filter(
+            Disruption.disruption_type == "Rush Order",
+            Disruption.status.in_(["Open", "Analyzed", "Awaiting Scheduling", "Scheduled"]),
+        )
+        .all()
+    )
+    for ro in active_rush:
+        explanations.append({
+            "type": "rush_order",
+            "message": (
+                f"Rush Order {ro.rush_job_id or ro.resource} prioritized to protect committed deadline {ro.deadline or 'urgent'}."
+            ),
         })
 
     # Fallback explanation if no operations changed

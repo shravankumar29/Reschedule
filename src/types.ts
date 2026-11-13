@@ -63,7 +63,19 @@ export interface Disruption {
   resource: string
   reported: string
   severity: 'Critical' | 'High' | 'Medium' | 'Low'
-  status: 'Open' | 'Analyzed' | 'Resolved'
+  status:
+    | 'Open'
+    | 'Analyzed'
+    | 'Resolved'
+    | 'Reported'
+    | 'Under Repair'
+    | 'Recovered'
+    | 'Awaiting Material'
+    | 'Received'
+    | 'Awaiting Scheduling'
+    | 'Scheduled'
+    | 'Cancelled'
+    | string
   description: string
   affectedOrders: string[]
   recovery: string

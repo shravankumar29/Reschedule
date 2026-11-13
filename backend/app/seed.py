@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, engine, Base
 from app.models.machine import Machine
 from app.models.job import Job, Operation
+from app.models.material import Material, MaterialRequirement
 from app.models.disruption import Disruption
 from app.models.schedule import Schedule, ScheduleOperation
 
@@ -99,6 +100,71 @@ def seed_machines(db: Session):
     print(f"Seeded {len(machines)} machines.")
 
 
+def seed_materials(db: Session):
+    materials = [
+        Material(
+            material_id="MAT-001",
+            name="4140 Alloy Steel Billet",
+            category="Raw Material",
+            unit="kg",
+            available_quantity=500.0,
+            reserved_quantity=120.0,
+            min_stock_level=50.0,
+            supplier="Tata Steel Ltd",
+            lead_time_days=3,
+        ),
+        Material(
+            material_id="MAT-002",
+            name="Aluminum 6061-T6 Bar",
+            category="Raw Material",
+            unit="kg",
+            available_quantity=320.0,
+            reserved_quantity=80.0,
+            min_stock_level=40.0,
+            supplier="Hindalco Industries",
+            lead_time_days=2,
+        ),
+        Material(
+            material_id="MAT-003",
+            name="SS 316L Round Bar",
+            category="Raw Material",
+            unit="kg",
+            available_quantity=45.0,
+            reserved_quantity=30.0,
+            min_stock_level=50.0,
+            supplier="Jindal Stainless",
+            lead_time_days=4,
+        ),
+        Material(
+            material_id="MAT-004",
+            name="EN8 Carbon Steel Shaft Blank",
+            category="Forgings",
+            unit="pcs",
+            available_quantity=150.0,
+            reserved_quantity=40.0,
+            min_stock_level=25.0,
+            supplier="Bharat Forge",
+            lead_time_days=5,
+        ),
+        Material(
+            material_id="MAT-005",
+            name="Brass C360 Hex Rod",
+            category="Bar Stock",
+            unit="kg",
+            available_quantity=90.0,
+            reserved_quantity=15.0,
+            min_stock_level=20.0,
+            supplier="Metals India Corp",
+            lead_time_days=2,
+        ),
+    ]
+    for m in materials:
+        if not db.query(Material).filter(Material.material_id == m.material_id).first():
+            db.add(m)
+    db.commit()
+    print(f"Seeded {len(materials)} materials.")
+
+
 def seed_jobs(db: Session):
     today = "2026-11-07"
     # Deadlines spread over the next 3 days
@@ -117,7 +183,7 @@ def seed_jobs(db: Session):
             "deadline": "2026-11-09",
             "status": "Pending",
             "operations": [
-                {"operation_id": "J-101-OP1", "operation_name": "Turning", "processing_time": 3.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
+                {"operation_id": "J-101-OP1", "operation_name": "Turning", "processing_time": 3.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-001", "required_material_qty": 48.0},
                 {"operation_id": "J-101-OP2", "operation_name": "Drilling", "processing_time": 2.0, "eligible_machine_ids": ["CNC-1", "CNC-2", "MILL-1"], "sequence_number": 2, "status": "Pending"},
                 {"operation_id": "J-101-OP3", "operation_name": "Grinding", "processing_time": 1.5, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
             ],
@@ -132,7 +198,7 @@ def seed_jobs(db: Session):
             "deadline": "2026-11-08",
             "status": "Pending",
             "operations": [
-                {"operation_id": "J-102-OP1", "operation_name": "Turning", "processing_time": 4.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending"},
+                {"operation_id": "J-102-OP1", "operation_name": "Turning", "processing_time": 4.0, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-004", "required_material_qty": 20.0},
                 {"operation_id": "J-102-OP2", "operation_name": "Boring", "processing_time": 2.5, "eligible_machine_ids": ["CNC-1", "CNC-2"], "sequence_number": 2, "status": "Pending"},
                 {"operation_id": "J-102-OP3", "operation_name": "Grinding", "processing_time": 1.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
             ],
@@ -147,7 +213,7 @@ def seed_jobs(db: Session):
             "deadline": "2026-11-09",
             "status": "Pending",
             "operations": [
-                {"operation_id": "J-103-OP1", "operation_name": "Milling", "processing_time": 3.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending"},
+                {"operation_id": "J-103-OP1", "operation_name": "Milling", "processing_time": 3.5, "eligible_machine_ids": ["MILL-1", "MILL-2"], "sequence_number": 1, "status": "Pending", "required_material_id": "MAT-002", "required_material_qty": 35.0},
                 {"operation_id": "J-103-OP2", "operation_name": "Drilling", "processing_time": 2.0, "eligible_machine_ids": ["MILL-1", "MILL-2", "CNC-1", "CNC-2"], "sequence_number": 2, "status": "Pending"},
                 {"operation_id": "J-103-OP3", "operation_name": "Grinding", "processing_time": 2.0, "eligible_machine_ids": ["GRIND-1"], "sequence_number": 3, "status": "Pending"},
             ],
@@ -265,10 +331,22 @@ def seed_jobs(db: Session):
         db.flush()
         for od in ops_data:
             od["job_id"] = job.job_id
+            mat_id = od.get("required_material_id")
+            mat_qty = od.get("required_material_qty")
             db.add(Operation(**od))
+            if mat_id and mat_qty:
+                db.add(
+                    MaterialRequirement(
+                        job_id=job.job_id,
+                        operation_id=od.get("operation_id"),
+                        material_id=mat_id,
+                        required_quantity=float(mat_qty),
+                        allocated_quantity=float(mat_qty),
+                    )
+                )
 
     db.commit()
-    print(f"Seeded {len(jobs_data)} jobs with operations.")
+    print(f"Seeded {len(jobs_data)} jobs with operations and material requirements.")
 
 
 def seed_all(reset: bool = True):
@@ -277,6 +355,7 @@ def seed_all(reset: bool = True):
     db: Session = SessionLocal()
     try:
         seed_machines(db)
+        seed_materials(db)
         seed_jobs(db)
         print("Seed complete. Run POST /api/schedule/generate to build the initial schedule.")
     finally:

@@ -25,7 +25,12 @@ from ..models.disruption import Disruption
 from ..models.job import Job, Operation
 from ..models.machine import Machine
 from ..models.schedule import Schedule, ScheduleOperation
-from ..utils.time_utils import get_breakdown_interval_minutes, MINS_PER_HOUR, SHIFT_START_HOUR
+from ..utils.time_utils import (
+    get_breakdown_interval_minutes,
+    parse_time_to_shift_minutes,
+    MINS_PER_HOUR,
+    SHIFT_START_HOUR,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +155,7 @@ def run_scheduling_engine(
         db.query(Disruption)
         .filter(
             Disruption.disruption_type == "Machine Breakdown",
-            Disruption.status.in_(["Open", "Analyzed"]),
+            Disruption.status.in_(["Open", "Analyzed", "Reported", "Under Repair"]),
         )
         .all()
     )
@@ -158,10 +163,39 @@ def run_scheduling_engine(
     machine_downtime_windows: Dict[str, List[Tuple[int, int]]] = {m.machine_id: [] for m in machines}
 
     for d in active_disruptions:
-        d_mid = d.resource.split(" · ")[0].strip() if d.resource else ""
+        d_mid = d.machine_id or (d.resource.split(" · ")[0].strip() if d.resource else "")
         if d_mid in machine_downtime_windows:
             s_min, e_min = get_breakdown_interval_minutes(d.breakdown_start, d.estimated_repair_hours)
             machine_downtime_windows[d_mid].append((s_min, e_min))
+
+    # 1b. From Disruption table (all active material delays)
+    active_mat_delays = (
+        db.query(Disruption)
+        .filter(
+            Disruption.disruption_type == "Material Delay",
+            Disruption.status.in_(["Open", "Analyzed", "Reported", "Awaiting Material"]),
+        )
+        .all()
+    )
+    material_delay_constraints: Dict[str, int] = {}
+    for md in active_mat_delays:
+        arr_min = parse_time_to_shift_minutes(md.expected_arrival or "15:00")
+        for op_id in (md.affected_operation_ids or []):
+            material_delay_constraints[op_id] = max(material_delay_constraints.get(op_id, 0), arr_min)
+        for jid in (md.affected_job_ids or []):
+            for job_obj in jobs:
+                if job_obj.job_id == jid and job_obj.operations:
+                    first_op = sorted(job_obj.operations, key=lambda x: x.sequence_number)[0]
+                    material_delay_constraints[first_op.operation_id] = max(
+                        material_delay_constraints.get(first_op.operation_id, 0), arr_min
+                    )
+        if md.material_id:
+            for job_obj in jobs:
+                for op_obj in job_obj.operations:
+                    if getattr(op_obj, "required_material_id", None) == md.material_id:
+                        material_delay_constraints[op_obj.operation_id] = max(
+                            material_delay_constraints.get(op_obj.operation_id, 0), arr_min
+                        )
 
     # 2. From machine maintenance_periods
     for machine in machines:
@@ -285,6 +319,16 @@ def run_scheduling_engine(
             elif release_min > 0:
                 model.Add(start_var >= release_min)
 
+            # Material availability constraint: cannot start before delayed material arrives
+            if op_id in material_delay_constraints:
+                mat_arrival_min = material_delay_constraints[op_id]
+                model.Add(start_var >= mat_arrival_min)
+                logger.info(
+                    "Enforced material delay on %s: start >= %d min",
+                    op_id,
+                    mat_arrival_min,
+                )
+
             machine_bools: Dict[str, Any] = {}
             for mid in eligible:
                 b = model.NewBoolVar(f"assign_{op_id}_{mid}")
@@ -312,7 +356,8 @@ def run_scheduling_engine(
             # Tardiness objective
             tardiness = model.NewIntVar(0, HORIZON, f"tard_{op_id}")
             model.AddMaxEquality(tardiness, [0, end_var - deadline_min])
-            p_weight = priority_weights.get(job.priority, 2)
+            is_rush = getattr(job, "is_rush_order", False) or job.priority == "Urgent"
+            p_weight = 100 if is_rush else priority_weights.get(job.priority, 2)
             tardiness_terms.append(p_weight * w_tardiness * tardiness)
 
             # Stability / Change penalty compared to baseline schedule

@@ -1,5 +1,15 @@
 from .machine import MachineCreate, MachineRead, MachineUpdate
 from .job import JobCreate, JobRead, JobUpdate, OperationCreate, OperationRead
-from .disruption import DisruptionCreate, DisruptionRead
+from .disruption import (
+    DisruptionCreate,
+    DisruptionRead,
+    BreakdownReportRequest,
+    BreakdownRecoverRequest,
+    BreakdownUpdateRequest,
+    MaterialDelayReportRequest,
+    MaterialDelayReceiveRequest,
+    RushOrderCreateRequest,
+    DisruptionWorkspaceSummary,
+)
 from .schedule import ScheduleRead, ScheduleOperationRead
-
+from .material import MaterialCreate, MaterialRead, MaterialUpdate, MaterialRequirementRead

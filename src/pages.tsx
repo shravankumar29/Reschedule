@@ -535,36 +535,1095 @@ export function MachinesPage() {
 }
 
 export function DisruptionsPage() {
-  const { disruptions, machines, orders, reportDisruption, analyzeDisruption } = useApp()
-  const [modal, setModal] = useState<DisruptionType | null>(null)
-  const [resource, setResource] = useState(machines[0]?.id ? `${machines[0].id} · ${machines[0].name}` : 'CNC-1 · CNC Turning Cell 01')
-  const [description, setDescription] = useState('')
-  const [severity, setSeverity] = useState('High')
-  const [breakdownTime, setBreakdownTime] = useState('10:00')
-  const [repairDuration, setRepairDuration] = useState('3')
-  const [affectedOrder, setAffectedOrder] = useState('J-101')
-  const [material, setMaterial] = useState('4140 Steel Billet')
-  const openForm = (type: DisruptionType) => { setModal(type); setDescription(''); setSeverity(type === 'Machine Breakdown' ? 'Critical' : 'High') }
-  const save = (event: FormEvent) => {
-    event.preventDefault()
-    const machineId = resource.split(' · ')[0]
-    const affected = modal === 'Rush Order' ? [affectedOrder] : modal === 'Material Delay' ? ['J-101', 'J-102'] : [affectedOrder]
-    const resourceName = modal === 'Material Delay' ? material : modal === 'Rush Order' ? affectedOrder : machineId
-    reportDisruption({
-      type: modal!,
-      resource: resourceName,
-      severity: severity as 'Critical' | 'High' | 'Medium' | 'Low',
-      description: description || `Breakdown reported on ${machineId} from ${breakdownTime}`,
-      affectedOrders: affected,
-      recovery: modal === 'Machine Breakdown' ? `${repairDuration}h estimated` : 'Next review in 2h',
-      breakdown_start: breakdownTime,
-      estimated_repair_hours: Number(repairDuration) || 3.0,
+  const {
+    machines,
+    orders,
+    disruptionSummary,
+    breakdowns,
+    materialDelays,
+    rushOrders,
+    materials,
+    refreshDisruptionsData,
+    reportBreakdownAction,
+    recoverBreakdownAction,
+    reportMaterialDelayAction,
+    receiveMaterialDelayAction,
+    createRushOrderAction,
+    scheduleRushOrderAction,
+    analyzeDisruption,
+    pushToast,
+  } = useApp()
+
+  const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<'breakdowns' | 'material-delays' | 'rush-orders'>('breakdowns')
+
+  // Search & Filter state
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('ALL')
+
+  // Modals state
+  const [breakdownModalOpen, setBreakdownModalOpen] = useState(false)
+  const [recoverModalItem, setRecoverModalItem] = useState<any | null>(null)
+  const [materialDelayModalOpen, setMaterialDelayModalOpen] = useState(false)
+  const [receiveModalItem, setReceiveModalItem] = useState<any | null>(null)
+  const [rushOrderModalOpen, setRushOrderModalOpen] = useState(false)
+  const [detailModalItem, setDetailModalItem] = useState<any | null>(null)
+
+  // Breakdown Form
+  const [bdMachineId, setBdMachineId] = useState(machines[0]?.id || 'CNC-1')
+  const [bdDescription, setBdDescription] = useState('')
+  const [bdStartTime, setBdStartTime] = useState('10:00')
+  const [bdRepairHours, setBdRepairHours] = useState('3.0')
+  const [bdSeverity, setBdSeverity] = useState('Critical')
+  const [bdNotes, setBdNotes] = useState('')
+
+  // Recover Form
+  const [recNotes, setRecNotes] = useState('Repairs completed, test cycle verified, returned to production queue.')
+
+  // Material Delay Form
+  const [matId, setMatId] = useState(materials[0]?.material_id || 'MAT-001')
+  const [matReason, setMatReason] = useState('Freight logistics delay')
+  const [matSupplier, setMatSupplier] = useState('')
+  const [matRequiredQty, setMatRequiredQty] = useState('50.0')
+  const [matAvailableQty, setMatAvailableQty] = useState('20.0')
+  const [matArrivalDate, setMatArrivalDate] = useState('2026-11-08')
+  const [matArrivalTime, setMatArrivalTime] = useState('14:00')
+  const [matSeverity, setMatSeverity] = useState('High')
+
+  // Receive Material Form
+  const [recQty, setRecQty] = useState('30.0')
+  const [recNotesMat, setRecNotesMat] = useState('Received and verified against QA sheet.')
+
+  // Rush Order Form
+  const [rushCustomer, setRushCustomer] = useState('')
+  const [rushProduct, setRushProduct] = useState('')
+  const [rushQuantity, setRushQuantity] = useState('50')
+  const [rushDeadline, setRushDeadline] = useState('2026-11-09')
+  const [rushOps, setRushOps] = useState<Array<{ name: string; time: number; machines: string[] }>>([
+    { name: 'Turning', time: 2.0, machines: ['CNC-1', 'CNC-2'] },
+    { name: 'Milling', time: 1.5, machines: ['MILL-1', 'MILL-2'] },
+  ])
+
+  // Sync default material values when material selection changes
+  useEffect(() => {
+    const found = materials.find((m) => m.material_id === matId)
+    if (found) {
+      if (found.supplier) setMatSupplier(found.supplier)
+      setMatAvailableQty(String(found.available_quantity))
+    }
+  }, [matId, materials])
+
+  // Handlers
+  const handleReportBreakdown = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!bdMachineId) {
+      pushToast('Validation error', 'Please select a machine.', 'error')
+      return
+    }
+    if (!bdDescription.trim()) {
+      pushToast('Validation error', 'Please describe the breakdown failure.', 'error')
+      return
+    }
+    await reportBreakdownAction({
+      machine_id: bdMachineId,
+      description: bdDescription.trim(),
+      breakdown_start: bdStartTime,
+      estimated_repair_hours: parseFloat(bdRepairHours) || 3.0,
+      severity: bdSeverity,
+      notes: bdNotes,
     })
-    setModal(null)
+    setBreakdownModalOpen(false)
+    setBdDescription('')
   }
-  return <div className="page-stack"><PageHeader eyebrow="OPERATIONS / EXCEPTION CONTROL" title="Disruption Center" subtitle="Report unexpected events affecting production." actions={<div className="header-stamp warning"><span className="pulse-dot amber" /> {disruptions.filter((item) => item.status === 'Open').length} open events</div>} /><div className="disruption-intro"><div className="disruption-intro-mark"><AlertTriangle size={20} /></div><div><strong>Protect the promise, not the plan.</strong><span>Report the event with just enough detail to understand what can move next. ReSchedule will map affected orders and available alternatives.</span></div></div><div className="disruption-card-grid"><DisruptionCard icon={Wrench} title="Machine breakdown" text="A machine is unavailable or producing below tolerance." tone="brick" onClick={() => openForm('Machine Breakdown')} /><DisruptionCard icon={Zap} title="Rush order" text="A customer commitment needs priority treatment." tone="amber" onClick={() => openForm('Rush Order')} /><DisruptionCard icon={Boxes} title="Material delay" text="A late or short delivery may affect scheduled work." tone="blue" onClick={() => openForm('Material Delay')} /></div><Panel title="Disruption history" eyebrow="EVENT LOG" action={<span className="panel-meta"><BellRing size={14} /> Auto-synced to recovery</span>}><div className="table-wrap"><table><thead><tr><th>ID</th><th>Type</th><th>Affected resource</th><th>Reported</th><th>Severity</th><th>Status</th><th /></tr></thead><tbody>{disruptions.map((item) => <tr key={item.id}><td><strong className="mono">{item.id}</strong></td><td><span className="type-with-icon">{item.type === 'Machine Breakdown' ? <Wrench size={14} /> : item.type === 'Rush Order' ? <Zap size={14} /> : <Boxes size={14} />}{item.type}</span></td><td>{item.resource}</td><td>{item.reported}</td><td><StatusBadge value={item.severity} /></td><td><StatusBadge value={item.status} /></td><td>{item.status === 'Open' && <button className="small-action" onClick={() => analyzeDisruption(item.id)}>Analyze impact <ArrowRight size={13} /></button>}</td></tr>)}</tbody></table></div></Panel><Modal open={!!modal} onClose={() => setModal(null)} title={modal ?? ''} subtitle="Add enough context for the recovery plan."><form onSubmit={save}><div className="form-grid">{modal === 'Machine Breakdown' && <><SelectField label="Select machine" value={resource} onChange={setResource} options={machines.map((machine) => `${machine.id} · ${machine.name}`)} /><TextField label="Breakdown time (e.g. 10:00)" value={breakdownTime} onChange={setBreakdownTime} placeholder="10:00" /><TextField label="Estimated repair duration (hours)" value={repairDuration} onChange={setRepairDuration} type="number" placeholder="3" /></>}{modal === 'Rush Order' && <><SelectField label="Order ID" value={affectedOrder} onChange={setAffectedOrder} options={orders.map((order) => order.id)} /><TextField label="Product name" value={orders.find((order) => order.id === affectedOrder)?.product ?? ''} onChange={() => undefined} /><TextField label="Required quantity" value={orders.find((order) => order.id === affectedOrder)?.quantity ?? 0} onChange={() => undefined} type="number" /><TextField label="Required delivery date" value="2026-11-09" onChange={() => undefined} type="date" /></>}{modal === 'Material Delay' && <><TextField label="Material name" value={material} onChange={setMaterial} /><TextField label="Affected orders" value="J-101, J-102" onChange={() => undefined} /><TextField label="Expected arrival date" value="2026-11-08" onChange={() => undefined} type="date" /><TextField label="Available stock" value="42 units" onChange={() => undefined} /></>}<SelectField label="Severity" value={severity} onChange={setSeverity} options={['Critical', 'High', 'Medium', 'Low']} /></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What happened on the floor?" rows={3} /></label><div className="modal-actions"><Button variant="outline" onClick={() => setModal(null)}>Cancel</Button><Button type="submit" icon={<AlertTriangle size={15} />}>Report disruption</Button></div></form></Modal></div>
+
+  const handleRecoverBreakdown = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!recoverModalItem) return
+    await recoverBreakdownAction(recoverModalItem.disruption_id, {
+      recovery_notes: recNotes,
+    })
+    setRecoverModalItem(null)
+  }
+
+  const handleReportMaterialDelay = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!matId) {
+      pushToast('Validation error', 'Please select a material.', 'error')
+      return
+    }
+    await reportMaterialDelayAction({
+      material_id: matId,
+      delay_reason: matReason.trim(),
+      supplier: matSupplier.trim(),
+      required_quantity: parseFloat(matRequiredQty) || 50.0,
+      available_quantity: parseFloat(matAvailableQty) || 0.0,
+      expected_arrival_date: matArrivalDate,
+      expected_arrival_time: matArrivalTime,
+      severity: matSeverity,
+    })
+    setMaterialDelayModalOpen(false)
+  }
+
+  const handleReceiveMaterial = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!receiveModalItem) return
+    await receiveMaterialDelayAction(receiveModalItem.disruption_id, {
+      received_quantity: parseFloat(recQty) || 0,
+      notes: recNotesMat,
+    })
+    setReceiveModalItem(null)
+  }
+
+  const handleAddRushOp = () => {
+    setRushOps([...rushOps, { name: 'Finishing', time: 1.0, machines: ['GRIND-1'] }])
+  }
+
+  const handleRemoveRushOp = (index: number) => {
+    if (rushOps.length <= 1) {
+      pushToast('Warning', 'A rush order must have at least one operation.', 'warning')
+      return
+    }
+    setRushOps(rushOps.filter((_, idx) => idx !== index))
+  }
+
+  const handleCreateRushOrder = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!rushCustomer.trim() || !rushProduct.trim()) {
+      pushToast('Validation error', 'Customer name and product name are required.', 'error')
+      return
+    }
+    const operationsPayload = rushOps.map((op, idx) => ({
+      operation_name: op.name,
+      processing_time: op.time,
+      eligible_machine_ids: op.machines,
+      sequence_number: idx + 1,
+    }))
+
+    await createRushOrderAction({
+      customer_name: rushCustomer.trim(),
+      product_name: rushProduct.trim(),
+      quantity: parseInt(rushQuantity, 10) || 50,
+      deadline: rushDeadline,
+      operations: operationsPayload,
+    })
+    setRushOrderModalOpen(false)
+    setRushCustomer('')
+    setRushProduct('')
+  }
+
+  // Filtered lists
+  const filteredBreakdowns = breakdowns.filter((b) => {
+    const matchesSearch =
+      !searchTerm ||
+      b.disruption_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (b.machine_id && b.machine_id.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (b.description && b.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    const matchesStatus = statusFilter === 'ALL' || b.status.toUpperCase() === statusFilter.toUpperCase()
+    return matchesSearch && matchesStatus
+  })
+
+  const filteredMaterialDelays = materialDelays.filter((m) => {
+    const matchesSearch =
+      !searchTerm ||
+      m.disruption_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (m.material_id && m.material_id.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (m.supplier && m.supplier.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (m.description && m.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    const matchesStatus = statusFilter === 'ALL' || m.status.toUpperCase() === statusFilter.toUpperCase()
+    return matchesSearch && matchesStatus
+  })
+
+  const filteredRushOrders = rushOrders.filter((r) => {
+    const matchesSearch =
+      !searchTerm ||
+      r.rush_order_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.product_name.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesStatus = statusFilter === 'ALL' || r.status.toUpperCase() === statusFilter.toUpperCase()
+    return matchesSearch && matchesStatus
+  })
+
+  const activeBreakdownsCount = disruptionSummary?.active_machine_breakdowns ?? breakdowns.filter((b) => b.status !== 'Recovered').length
+  const activeDelaysCount = disruptionSummary?.active_material_delays ?? materialDelays.filter((m) => m.status !== 'Received').length
+  const openRushCount = disruptionSummary?.open_rush_orders ?? rushOrders.filter((r) => r.status !== 'Scheduled' && r.status !== 'Completed').length
+  const totalAffectedCount = disruptionSummary?.total_affected_orders ?? 0
+
+  return (
+    <div className="page-stack">
+      <PageHeader
+        eyebrow="OPERATIONS / EXCEPTION CONTROL"
+        title="Disruption Management Workspace"
+        subtitle="Manage machine breakdowns, material delivery delays, and urgent rush orders connected to CP-SAT solver recovery."
+        actions={
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              icon={<RefreshCw size={14} />}
+              onClick={refreshDisruptionsData}
+            >
+              Refresh Data
+            </Button>
+            {activeTab === 'breakdowns' && (
+              <Button icon={<Wrench size={14} />} onClick={() => setBreakdownModalOpen(true)}>
+                Report Breakdown
+              </Button>
+            )}
+            {activeTab === 'material-delays' && (
+              <Button icon={<Boxes size={14} />} onClick={() => setMaterialDelayModalOpen(true)}>
+                Report Material Delay
+              </Button>
+            )}
+            {activeTab === 'rush-orders' && (
+              <Button icon={<Zap size={14} />} onClick={() => setRushOrderModalOpen(true)}>
+                Create Rush Order
+              </Button>
+            )}
+          </div>
+        }
+      />
+
+      {/* Top Workspace KPI Summary Cards */}
+      <div className="stats-grid four">
+        <StatCard
+          label="Machine Breakdowns"
+          value={String(activeBreakdownsCount)}
+          detail="Active offline cells"
+          icon={Wrench}
+          tone="brick"
+        />
+        <StatCard
+          label="Material Delays"
+          value={String(activeDelaysCount)}
+          detail="Awaiting incoming stock"
+          icon={Boxes}
+          tone="amber"
+        />
+        <StatCard
+          label="Open Rush Orders"
+          value={String(openRushCount)}
+          detail="Awaiting scheduler insertion"
+          icon={Zap}
+          tone="blue"
+        />
+        <StatCard
+          label="Affected Orders"
+          value={String(totalAffectedCount)}
+          detail="Customer commitments at risk"
+          icon={AlertTriangle}
+          tone="teal"
+        />
+      </div>
+
+      {/* Category Tabs */}
+      <div className="flex border-b border-border gap-2 pb-0 mb-2">
+        <button
+          onClick={() => { setActiveTab('breakdowns'); setSearchTerm(''); setStatusFilter('ALL') }}
+          className={`flex items-center gap-2 px-4 py-3 font-medium text-xs rounded-t border-b-2 transition-all ${
+            activeTab === 'breakdowns'
+              ? 'border-primary text-primary font-bold bg-white'
+              : 'border-transparent text-muted hover:text-text hover:border-gray-300'
+          }`}
+        >
+          <Wrench size={15} />
+          <span>Machine Breakdowns</span>
+          {activeBreakdownsCount > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-red-100 text-red-700 font-bold">
+              {activeBreakdownsCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => { setActiveTab('material-delays'); setSearchTerm(''); setStatusFilter('ALL') }}
+          className={`flex items-center gap-2 px-4 py-3 font-medium text-xs rounded-t border-b-2 transition-all ${
+            activeTab === 'material-delays'
+              ? 'border-primary text-primary font-bold bg-white'
+              : 'border-transparent text-muted hover:text-text hover:border-gray-300'
+          }`}
+        >
+          <Boxes size={15} />
+          <span>Material Delays</span>
+          {activeDelaysCount > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800 font-bold">
+              {activeDelaysCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => { setActiveTab('rush-orders'); setSearchTerm(''); setStatusFilter('ALL') }}
+          className={`flex items-center gap-2 px-4 py-3 font-medium text-xs rounded-t border-b-2 transition-all ${
+            activeTab === 'rush-orders'
+              ? 'border-primary text-primary font-bold bg-white'
+              : 'border-transparent text-muted hover:text-text hover:border-gray-300'
+          }`}
+        >
+          <Zap size={15} />
+          <span>Rush Orders</span>
+          {openRushCount > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-800 font-bold">
+              {openRushCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="flex justify-between items-center bg-white p-3 rounded border border-border">
+        <div className="flex items-center gap-2 flex-1 max-w-sm">
+          <Search size={14} className="text-muted" />
+          <input
+            className="w-full text-xs outline-none bg-transparent"
+            placeholder={
+              activeTab === 'breakdowns'
+                ? 'Search breakdowns by machine or ID...'
+                : activeTab === 'material-delays'
+                ? 'Search material delays by material or supplier...'
+                : 'Search rush orders by customer, product, or ID...'
+            }
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted font-medium">Status:</span>
+          <select
+            className="text-xs bg-soft border border-border rounded px-2 py-1 outline-none"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            {activeTab === 'breakdowns' && (
+              <>
+                <option value="REPORTED">Reported</option>
+                <option value="UNDER REPAIR">Under Repair</option>
+                <option value="RECOVERED">Recovered</option>
+              </>
+            )}
+            {activeTab === 'material-delays' && (
+              <>
+                <option value="AWAITING MATERIAL">Awaiting Material</option>
+                <option value="RECEIVED">Received</option>
+              </>
+            )}
+            {activeTab === 'rush-orders' && (
+              <>
+                <option value="AWAITING SCHEDULING">Awaiting Scheduling</option>
+                <option value="SCHEDULED">Scheduled</option>
+              </>
+            )}
+          </select>
+        </div>
+      </div>
+
+      {/* TAB 1: MACHINE BREAKDOWNS */}
+      {activeTab === 'breakdowns' && (
+        <Panel
+          title="Machine Breakdown Records"
+          eyebrow="CELL DOWNTIME TRACKING"
+          action={
+            <Button
+              variant="quiet"
+              icon={<Plus size={13} />}
+              onClick={() => setBreakdownModalOpen(true)}
+            >
+              Report New Breakdown
+            </Button>
+          }
+        >
+          {filteredBreakdowns.length === 0 ? (
+            <EmptyState
+              icon={Wrench}
+              title="No machine breakdowns recorded"
+              description="All manufacturing cells are currently operating under normal status."
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Breakdown ID</th>
+                    <th>Machine</th>
+                    <th>Failure Description</th>
+                    <th>Downtime Window</th>
+                    <th>Estimated Repair</th>
+                    <th>Affected Orders</th>
+                    <th>Status</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredBreakdowns.map((b) => (
+                    <tr key={b.disruption_id}>
+                      <td>
+                        <strong className="mono text-xs">{b.disruption_id}</strong>
+                      </td>
+                      <td>
+                        <div className="font-semibold text-xs text-text">{b.machine_id || b.resource}</div>
+                        <span className="text-[10px] text-muted">
+                          {machines.find((m) => m.id === b.machine_id)?.name || 'Machine Cell'}
+                        </span>
+                      </td>
+                      <td className="max-w-xs text-xs truncate" title={b.description}>
+                        {b.description || 'Unplanned breakdown reported'}
+                      </td>
+                      <td className="text-xs">
+                        {b.breakdown_start ? `From ${b.breakdown_start}` : 'Immediate'}
+                      </td>
+                      <td className="text-xs">
+                        {b.estimated_repair_hours ? `${b.estimated_repair_hours} hrs` : '4.0 hrs'}
+                      </td>
+                      <td>
+                        <span className="text-xs text-muted">
+                          {b.affected_job_ids && b.affected_job_ids.length > 0
+                            ? b.affected_job_ids.join(', ')
+                            : 'None'}
+                        </span>
+                      </td>
+                      <td>
+                        <StatusBadge
+                          value={
+                            b.status === 'Under Repair' || b.status === 'Reported'
+                              ? 'Breakdown'
+                              : b.status === 'Recovered'
+                              ? 'Resolved'
+                              : (b.status as any)
+                          }
+                        />
+                      </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {b.status !== 'Recovered' && (
+                            <Button
+                              variant="quiet"
+                              className="text-xs py-1"
+                              icon={<CheckCircle2 size={13} />}
+                              onClick={() => {
+                                setRecoverModalItem(b)
+                                setRecNotes('Repairs completed, test cycle verified.')
+                              }}
+                            >
+                              Recover
+                            </Button>
+                          )}
+                          <button
+                            className="small-action"
+                            onClick={() => setDetailModalItem(b)}
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* TAB 2: MATERIAL DELAYS */}
+      {activeTab === 'material-delays' && (
+        <Panel
+          title="Material Delays & Stock Shortages"
+          eyebrow="SUPPLY CHAIN DISRUPTIONS"
+          action={
+            <Button
+              variant="quiet"
+              icon={<Plus size={13} />}
+              onClick={() => setMaterialDelayModalOpen(true)}
+            >
+              Report Material Delay
+            </Button>
+          }
+        >
+          {filteredMaterialDelays.length === 0 ? (
+            <EmptyState
+              icon={Boxes}
+              title="No material delays reported"
+              description="Inventory levels and planned deliveries are currently meeting production requirements."
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Delay ID</th>
+                    <th>Material</th>
+                    <th>Supplier</th>
+                    <th>Required / Avail</th>
+                    <th>Shortage</th>
+                    <th>Expected Arrival</th>
+                    <th>Affected Ops</th>
+                    <th>Status</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMaterialDelays.map((m) => (
+                    <tr key={m.disruption_id}>
+                      <td>
+                        <strong className="mono text-xs">{m.disruption_id}</strong>
+                      </td>
+                      <td>
+                        <div className="font-semibold text-xs text-text">{m.material_id || m.resource}</div>
+                        <span className="text-[10px] text-muted">
+                          {materials.find((mat) => mat.material_id === m.material_id)?.name || 'Raw Material'}
+                        </span>
+                      </td>
+                      <td className="text-xs text-muted">{m.supplier || 'Vendor'}</td>
+                      <td className="text-xs">
+                        {m.required_quantity != null && m.available_quantity != null ? (
+                          <span>
+                            {m.required_quantity} / {m.available_quantity}
+                          </span>
+                        ) : (
+                          'N/A'
+                        )}
+                      </td>
+                      <td>
+                        {m.shortage_quantity ? (
+                          <span className="text-xs font-semibold text-red-600">
+                            {m.shortage_quantity} kg
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted">0</span>
+                        )}
+                      </td>
+                      <td className="text-xs font-medium">
+                        {m.expected_arrival || 'TBD'}
+                      </td>
+                      <td>
+                        <span className="text-xs text-muted">
+                          {m.affected_operation_ids && m.affected_operation_ids.length > 0
+                            ? m.affected_operation_ids.join(', ')
+                            : m.affected_job_ids?.join(', ') || 'None'}
+                        </span>
+                      </td>
+                      <td>
+                        <StatusBadge
+                          value={
+                            m.status === 'Received'
+                              ? 'Resolved'
+                              : m.status === 'Awaiting Material'
+                              ? 'Ongoing'
+                              : (m.status as any)
+                          }
+                        />
+                      </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {m.status !== 'Received' && (
+                            <Button
+                              variant="quiet"
+                              className="text-xs py-1"
+                              icon={<PackageCheck size={13} />}
+                              onClick={() => {
+                                setReceiveModalItem(m)
+                                setRecQty(String(m.shortage_quantity || 30.0))
+                              }}
+                            >
+                              Receive
+                            </Button>
+                          )}
+                          <button
+                            className="small-action"
+                            onClick={() => setDetailModalItem(m)}
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* TAB 3: RUSH ORDERS */}
+      {activeTab === 'rush-orders' && (
+        <Panel
+          title="Urgent Rush Orders"
+          eyebrow="HIGH-PRIORITY EXPEDITION"
+          action={
+            <Button
+              variant="quiet"
+              icon={<Plus size={13} />}
+              onClick={() => setRushOrderModalOpen(true)}
+            >
+              Add Rush Order
+            </Button>
+          }
+        >
+          {filteredRushOrders.length === 0 ? (
+            <EmptyState
+              icon={Zap}
+              title="No rush orders registered"
+              description="Standard production sequence is active with no emergency insertion orders."
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Order ID</th>
+                    <th>Customer & Product</th>
+                    <th>Quantity</th>
+                    <th>Deadline</th>
+                    <th>Priority</th>
+                    <th>Operations</th>
+                    <th>Status</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRushOrders.map((r) => (
+                    <tr key={r.rush_order_id}>
+                      <td>
+                        <strong className="mono text-xs">{r.rush_order_id}</strong>
+                      </td>
+                      <td>
+                        <div className="font-semibold text-xs text-text">{r.customer_name}</div>
+                        <span className="text-[10px] text-muted">{r.product_name}</span>
+                      </td>
+                      <td className="text-xs font-semibold">{r.quantity} pcs</td>
+                      <td className="text-xs font-medium text-red-600">{r.deadline}</td>
+                      <td>
+                        <Badge tone="danger">Urgent</Badge>
+                      </td>
+                      <td>
+                        <span className="text-xs text-muted">
+                          {r.operations.length} steps ({r.operations.map((o) => o.operation_name).join(' → ')})
+                        </span>
+                      </td>
+                      <td>
+                        <StatusBadge
+                          value={
+                            r.status === 'Scheduled'
+                              ? 'Scheduled'
+                              : r.status === 'Awaiting Scheduling'
+                              ? 'High'
+                              : (r.status as any)
+                          }
+                        />
+                      </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="primary"
+                            className="text-xs py-1"
+                            icon={<GitBranch size={13} />}
+                            onClick={async () => {
+                              await scheduleRushOrderAction(r.rush_order_id)
+                              navigate('/rescheduling')
+                            }}
+                          >
+                            Schedule
+                          </Button>
+                          <button
+                            className="small-action"
+                            onClick={() => setDetailModalItem(r)}
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* MODAL 1: REPORT BREAKDOWN */}
+      <Modal
+        open={breakdownModalOpen}
+        onClose={() => setBreakdownModalOpen(false)}
+        title="Report Machine Breakdown"
+        subtitle="Log an unplanned cell failure to mark machine capacity offline and compute affected schedule operations."
+      >
+        <form onSubmit={handleReportBreakdown}>
+          <div className="form-grid">
+            <SelectField
+              label="Select Machine"
+              value={bdMachineId}
+              onChange={setBdMachineId}
+              options={machines.map((m) => `${m.id} · ${m.name}`)}
+            />
+            <TextField
+              label="Breakdown Start Time (e.g. 10:00)"
+              value={bdStartTime}
+              onChange={setBdStartTime}
+              placeholder="10:00"
+            />
+            <TextField
+              label="Estimated Repair Hours"
+              value={bdRepairHours}
+              onChange={setBdRepairHours}
+              type="number"
+              placeholder="3.0"
+            />
+            <SelectField
+              label="Severity"
+              value={bdSeverity}
+              onChange={setBdSeverity}
+              options={['Critical', 'High', 'Medium', 'Low']}
+            />
+          </div>
+          <div className="my-3">
+            <label className="field">
+              <span>Failure Description</span>
+              <textarea
+                value={bdDescription}
+                onChange={(e) => setBdDescription(e.target.value)}
+                placeholder="e.g. Spindle bearing vibration alarm, spindle offline for bearing replacement."
+                rows={3}
+                required
+              />
+            </label>
+          </div>
+          <div className="my-2">
+            <label className="field">
+              <span>Maintenance Notes (Optional)</span>
+              <input
+                className="text-xs p-2 border border-border rounded w-full"
+                value={bdNotes}
+                onChange={(e) => setBdNotes(e.target.value)}
+                placeholder="Technician dispatched from plant maintenance division."
+              />
+            </label>
+          </div>
+          <div className="modal-actions mt-4">
+            <Button variant="outline" onClick={() => setBreakdownModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<AlertTriangle size={15} />}>
+              Report Breakdown
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 2: RECOVER MACHINE */}
+      <Modal
+        open={!!recoverModalItem}
+        onClose={() => setRecoverModalItem(null)}
+        title={`Recover Machine ${recoverModalItem?.machine_id || ''}`}
+        subtitle="Record actual repair completion and restore cell availability in the factory model."
+      >
+        <form onSubmit={handleRecoverBreakdown}>
+          <div className="p-3 bg-soft rounded border border-border mb-3 text-xs">
+            <div>
+              <strong>Breakdown ID:</strong> {recoverModalItem?.disruption_id}
+            </div>
+            <div>
+              <strong>Failure:</strong> {recoverModalItem?.description}
+            </div>
+            <div>
+              <strong>Reported Duration:</strong> {recoverModalItem?.estimated_repair_hours} hrs
+            </div>
+          </div>
+          <label className="field">
+            <span>Recovery Notes</span>
+            <textarea
+              value={recNotes}
+              onChange={(e) => setRecNotes(e.target.value)}
+              placeholder="Describe repairs conducted and verification test runs..."
+              rows={3}
+              required
+            />
+          </label>
+          <div className="modal-actions mt-4">
+            <Button variant="outline" onClick={() => setRecoverModalItem(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<CheckCircle2 size={15} />}>
+              Confirm Machine Recovery
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 3: REPORT MATERIAL DELAY */}
+      <Modal
+        open={materialDelayModalOpen}
+        onClose={() => setMaterialDelayModalOpen(false)}
+        title="Report Material Delivery Delay"
+        subtitle="Log late raw material arrival to calculate production shortages and constrain dependent operation start times."
+      >
+        <form onSubmit={handleReportMaterialDelay}>
+          <div className="form-grid">
+            <SelectField
+              label="Select Material"
+              value={matId}
+              onChange={setMatId}
+              options={materials.map((m) => `${m.material_id} · ${m.name}`)}
+            />
+            <TextField
+              label="Supplier"
+              value={matSupplier}
+              onChange={setMatSupplier}
+              placeholder="e.g. Apex Metals Corp"
+            />
+            <TextField
+              label="Required Quantity (kg/units)"
+              value={matRequiredQty}
+              onChange={setMatRequiredQty}
+              type="number"
+            />
+            <TextField
+              label="Available In-Stock (kg/units)"
+              value={matAvailableQty}
+              onChange={setMatAvailableQty}
+              type="number"
+            />
+            <TextField
+              label="Expected Arrival Date"
+              value={matArrivalDate}
+              onChange={setMatArrivalDate}
+              type="date"
+            />
+            <TextField
+              label="Expected Arrival Time"
+              value={matArrivalTime}
+              onChange={setMatArrivalTime}
+              placeholder="14:00"
+            />
+            <SelectField
+              label="Severity"
+              value={matSeverity}
+              onChange={setMatSeverity}
+              options={['High', 'Critical', 'Medium', 'Low']}
+            />
+          </div>
+          <div className="my-3">
+            <label className="field">
+              <span>Delay Reason</span>
+              <textarea
+                value={matReason}
+                onChange={(e) => setMatReason(e.target.value)}
+                placeholder="e.g. Freight customs clearance delay at port warehouse."
+                rows={2}
+                required
+              />
+            </label>
+          </div>
+          <div className="modal-actions mt-4">
+            <Button variant="outline" onClick={() => setMaterialDelayModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<Boxes size={15} />}>
+              Report Delay
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 4: RECEIVE MATERIAL */}
+      <Modal
+        open={!!receiveModalItem}
+        onClose={() => setReceiveModalItem(null)}
+        title={`Receive Material for ${receiveModalItem?.disruption_id || ''}`}
+        subtitle="Confirm physical receipt of delayed raw material to replenish inventory and release operational constraints."
+      >
+        <form onSubmit={handleReceiveMaterial}>
+          <div className="p-3 bg-soft rounded border border-border mb-3 text-xs">
+            <div>
+              <strong>Disruption ID:</strong> {receiveModalItem?.disruption_id}
+            </div>
+            <div>
+              <strong>Material:</strong> {receiveModalItem?.material_id}
+            </div>
+            <div>
+              <strong>Reported Shortage:</strong> {receiveModalItem?.shortage_quantity} units
+            </div>
+          </div>
+          <div className="form-grid">
+            <TextField
+              label="Received Quantity (units)"
+              value={recQty}
+              onChange={setRecQty}
+              type="number"
+            />
+          </div>
+          <div className="my-3">
+            <label className="field">
+              <span>Receipt Notes</span>
+              <textarea
+                value={recNotesMat}
+                onChange={(e) => setRecNotesMat(e.target.value)}
+                placeholder="Inspected and accepted at receiving dock..."
+                rows={2}
+              />
+            </label>
+          </div>
+          <div className="modal-actions mt-4">
+            <Button variant="outline" onClick={() => setReceiveModalItem(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<PackageCheck size={15} />}>
+              Confirm Receipt
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 5: CREATE RUSH ORDER */}
+      <Modal
+        open={rushOrderModalOpen}
+        onClose={() => setRushOrderModalOpen(false)}
+        title="Create Urgent Customer Rush Order"
+        subtitle="Insert an emergency customer job with high priority into the production pipeline."
+        wide
+      >
+        <form onSubmit={handleCreateRushOrder}>
+          <div className="form-grid">
+            <TextField
+              label="Customer Name"
+              value={rushCustomer}
+              onChange={setRushCustomer}
+              placeholder="e.g. AeroSpace Dynamics Ltd"
+            />
+            <TextField
+              label="Product Name"
+              value={rushProduct}
+              onChange={setRushProduct}
+              placeholder="e.g. Titanium Manifold Flange"
+            />
+            <TextField
+              label="Order Quantity (units)"
+              value={rushQuantity}
+              onChange={setRushQuantity}
+              type="number"
+            />
+            <TextField
+              label="Deadline Date"
+              value={rushDeadline}
+              onChange={setRushDeadline}
+              type="date"
+            />
+          </div>
+
+          <div className="mt-4 mb-2">
+            <div className="flex justify-between items-center mb-2">
+              <strong className="text-xs font-semibold uppercase text-muted">
+                Production Routing Operations ({rushOps.length})
+              </strong>
+              <Button variant="quiet" icon={<Plus size={13} />} onClick={handleAddRushOp}>
+                Add Operation
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {rushOps.map((op, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 bg-soft rounded border border-border flex items-center justify-between gap-3 text-xs"
+                >
+                  <span className="font-bold text-muted mono">#{idx + 1}</span>
+                  <div className="flex-1">
+                    <span className="text-[10px] text-muted uppercase">Operation</span>
+                    <input
+                      className="w-full text-xs p-1 border border-border rounded bg-white"
+                      value={op.name}
+                      onChange={(e) => {
+                        const updated = [...rushOps]
+                        updated[idx].name = e.target.value
+                        setRushOps(updated)
+                      }}
+                      placeholder="e.g. Turning"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <span className="text-[10px] text-muted uppercase">Duration (hrs)</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="w-full text-xs p-1 border border-border rounded bg-white"
+                      value={op.time}
+                      onChange={(e) => {
+                        const updated = [...rushOps]
+                        updated[idx].time = parseFloat(e.target.value) || 1.0
+                        setRushOps(updated)
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-[10px] text-muted uppercase">Eligible Machine</span>
+                    <select
+                      className="w-full text-xs p-1 border border-border rounded bg-white"
+                      value={op.machines[0]}
+                      onChange={(e) => {
+                        const updated = [...rushOps]
+                        updated[idx].machines = [e.target.value]
+                        setRushOps(updated)
+                      }}
+                    >
+                      {machines.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.id} ({m.name})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-btn danger-icon mt-3"
+                    onClick={() => handleRemoveRushOp(idx)}
+                    title="Remove operation"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="modal-actions mt-4">
+            <Button variant="outline" onClick={() => setRushOrderModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" icon={<Zap size={15} />}>
+              Create Rush Order
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL 6: VIEW DETAILS */}
+      <Modal
+        open={!!detailModalItem}
+        onClose={() => setDetailModalItem(null)}
+        title="Disruption Record Details"
+        subtitle="Complete database record and audit fields."
+      >
+        <div className="detail-grid">
+          {detailModalItem &&
+            Object.entries(detailModalItem).map(([key, val]) => (
+              <Detail
+                key={key}
+                label={key.replace(/_/g, ' ')}
+                value={
+                  typeof val === 'object' && val !== null
+                    ? JSON.stringify(val)
+                    : String(val ?? 'None')
+                }
+              />
+            ))}
+        </div>
+        <div className="modal-actions mt-4">
+          <Button onClick={() => setDetailModalItem(null)}>Close</Button>
+        </div>
+      </Modal>
+    </div>
+  )
 }
-function DisruptionCard({ icon: Icon, title, text, tone, onClick }: { icon: ComponentType<{ size?: number }>; title: string; text: string; tone: string; onClick: () => void }) { return <div className={`disruption-card ${tone}`}><div className="disruption-card-icon"><Icon size={20} /></div><div className="eyebrow">EVENT TYPE</div><h3>{title}</h3><p>{text}</p><Button variant="quiet" icon={<Plus size={14} />} onClick={onClick}>Report {title.toLowerCase()}</Button></div> }
 
 export function ReschedulingPage() {
   const {

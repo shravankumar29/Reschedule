@@ -100,12 +100,83 @@ export interface BackendDisruption {
   resource: string
   reported_at: string
   severity: 'Critical' | 'High' | 'Medium' | 'Low'
-  status: 'Open' | 'Analyzed' | 'Resolved'
+  status: string
   description?: string
   affected_job_ids: string[]
+  // Machine Breakdown
+  machine_id?: string
   breakdown_start?: string
   estimated_repair_hours?: number
   recovery_notes?: string
+  actual_recovery_at?: string
+  // Material Delay
+  material_id?: string
+  supplier?: string
+  required_quantity?: number
+  available_quantity?: number
+  shortage_quantity?: number
+  expected_arrival?: string
+  actual_arrival?: string
+  affected_operation_ids?: string[]
+  affected_machine_ids?: string[]
+  // Rush Order
+  rush_job_id?: string
+  deadline?: string
+}
+
+export interface BackendMaterial {
+  id: number
+  material_id: string
+  name: string
+  category: string
+  unit: string
+  available_quantity: number
+  reserved_quantity: number
+  min_stock_level: number
+  supplier?: string
+  lead_time_days: number
+}
+
+export interface BackendMaterialRequirement {
+  id: number
+  job_id: string
+  operation_id?: string
+  material_id: string
+  required_quantity: number
+  allocated_quantity: number
+}
+
+export interface DisruptionWorkspaceSummary {
+  active_machine_breakdowns: number
+  active_material_delays: number
+  open_rush_orders: number
+  total_affected_orders: number
+}
+
+export interface RushOrderResponse {
+  rush_order_id: string
+  disruption_id?: string
+  customer_name: string
+  product_name: string
+  quantity: number
+  order_date?: string
+  deadline: string
+  priority: string
+  status: string
+  production_status: string
+  operations: Array<{
+    operation_id: string
+    operation_name: string
+    processing_time: number
+    eligible_machine_ids: string[]
+    sequence_number: number
+    status: string
+  }>
+  required_materials: Array<{
+    material_id: string
+    required_quantity: number
+    allocated_quantity: number
+  }>
 }
 
 export interface BackendScheduleOp {
@@ -297,10 +368,55 @@ export const api = {
   updateJob: (id: string, data: any) => request<BackendJob>(`/jobs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteJob: (id: string) => request<void>(`/jobs/${id}`, { method: 'DELETE' }),
 
-  // Disruptions
+  // Disruptions & Multi-Category Disruption Workspace
   getDisruptions: () => request<BackendDisruption[]>('/disruptions/'),
+  getDisruptionsSummary: () => request<DisruptionWorkspaceSummary>('/disruptions/summary'),
   createDisruption: (data: Partial<BackendDisruption>) => request<BackendDisruption>('/disruptions/', { method: 'POST', body: JSON.stringify(data) }),
   resolveDisruption: (id: string) => request<BackendDisruption>(`/disruptions/${id}/resolve`, { method: 'PATCH' }),
+
+  // Breakdowns sub-category
+  listBreakdowns: () => request<BackendDisruption[]>('/disruptions/breakdowns'),
+  reportBreakdown: (payload: {
+    machine_id: string
+    description: string
+    breakdown_start?: string
+    estimated_repair_hours?: number
+    severity?: string
+    notes?: string
+  }) => request<BackendDisruption>('/disruptions/breakdowns', { method: 'POST', body: JSON.stringify(payload) }),
+  recoverBreakdown: (id: string, payload: { recovery_notes?: string; actual_recovery_time?: string }) =>
+    request<BackendDisruption>(`/disruptions/breakdowns/${id}/recover`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateBreakdown: (id: string, payload: { estimated_repair_hours?: number; status?: string; notes?: string }) =>
+    request<BackendDisruption>(`/disruptions/breakdowns/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  // Material Delays sub-category
+  listMaterialDelays: () => request<BackendDisruption[]>('/disruptions/material-delays'),
+  reportMaterialDelay: (payload: {
+    material_id: string
+    delay_reason?: string
+    supplier?: string
+    required_quantity?: number
+    available_quantity?: number
+    expected_arrival_date?: string
+    expected_arrival_time?: string
+    severity?: string
+  }) => request<BackendDisruption>('/disruptions/material-delays', { method: 'POST', body: JSON.stringify(payload) }),
+  receiveMaterialDelay: (id: string, payload: { received_quantity?: number; actual_arrival_time?: string; notes?: string }) =>
+    request<BackendDisruption>(`/disruptions/material-delays/${id}/receive`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateMaterialDelay: (id: string, payload: { expected_arrival_time?: string; status?: string; notes?: string }) =>
+    request<BackendDisruption>(`/disruptions/material-delays/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  // Rush Orders
+  listRushOrders: () => request<RushOrderResponse[]>('/rush-orders/'),
+  createRushOrder: (payload: any) => request<any>('/rush-orders/', { method: 'POST', body: JSON.stringify(payload) }),
+  scheduleRushOrder: (rushOrderId: string) => request<RescheduleResult>(`/rush-orders/${rushOrderId}/schedule`, { method: 'POST' }),
+
+  // Materials Inventory
+  listMaterials: () => request<BackendMaterial[]>('/materials/'),
+  createMaterial: (payload: Partial<BackendMaterial>) => request<BackendMaterial>('/materials/', { method: 'POST', body: JSON.stringify(payload) }),
+  getMaterial: (materialId: string) => request<BackendMaterial>(`/materials/${materialId}`),
+  updateMaterial: (materialId: string, payload: Partial<BackendMaterial>) => request<BackendMaterial>(`/materials/${materialId}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  getMaterialRequirements: (materialId: string) => request<BackendMaterialRequirement[]>(`/materials/${materialId}/requirements`),
 
   // Scheduling & Rescheduling
   generateSchedule: () => request<{ schedule_id: string; solver_status: string; operations: any[]; validation: any }>('/schedule/generate', { method: 'POST' }),
