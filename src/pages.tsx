@@ -3,6 +3,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, P
 import { Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, BellRing, Boxes, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, CloudCog, Download, Factory, FileDown, FileText, Gauge, GitBranch, HardHat, Layers3, MoreHorizontal, PackageCheck, Pencil, Plus, Printer, RefreshCw, Search, ShieldCheck, Sparkles, TimerReset, Trash2, TrendingUp, UserRound, Wrench, X, Zap } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, ConfirmLine, EmptyState, FilterBar, GanttTimeline, LogoMark, MiniBar, Modal, PageHeader, Panel, PriorityBadge, QuickAction, SelectField, SectionDivider, StatCard, StatusBadge, TextField, Toggle } from './components'
+import { OperationEditorModal } from './components/OperationEditorModal'
 import { useApp } from './context/AppContext'
 import { delayData, monthlyTrend, productionTrend } from './data/mockData'
 import type { DisruptionType, FactorySettings, Machine, Order, Priority, ScheduleTask } from './types'
@@ -593,6 +594,15 @@ export function ReschedulingPage() {
     proposedUnchangedCount,
     proposedError,
     clearProposedError,
+    isEditMode,
+    setIsEditMode,
+    selectedOperationForEdit,
+    setSelectedOperationForEdit,
+    proposalValidation,
+    startManualEdit,
+    updateDraftOperation,
+    discardDraftProposal,
+    validateCurrentProposal,
   } = useApp()
 
   const [prioritize, setPrioritize] = useState(true)
@@ -651,8 +661,15 @@ export function ReschedulingPage() {
     }
   }
 
+  const isApprovalDisabled =
+    !hasProposal ||
+    approving ||
+    generating ||
+    currentState === 'G' ||
+    (proposalValidation && !proposalValidation.valid)
+
   const handleApprove = async () => {
-    if (!hasProposal || approving || generating || currentState === 'G') return
+    if (isApprovalDisabled) return
     setApproving(true)
     try {
       await approveSchedule()
@@ -672,13 +689,8 @@ export function ReschedulingPage() {
     }
   }
 
-  const handleModifyClick = () => {
-    setControlsHighlighted(true)
-    const el = document.getElementById('rescheduling-controls-panel')
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-    setTimeout(() => setControlsHighlighted(false), 2500)
+  const handleModifyClick = async () => {
+    await startManualEdit()
   }
 
   const displaySchedule = proposedSchedule ?? schedule
@@ -1050,6 +1062,97 @@ export function ReschedulingPage() {
                 )}
               </div>
 
+              {/* Manual Edit Mode Toolbar */}
+              {isEditMode && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    background: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ background: '#22c55e', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Pencil size={14} />
+                    </div>
+                    <div>
+                      <strong style={{ color: '#166534', fontSize: 13, display: 'block' }}>
+                        Manual Schedule Editor Active (Draft: {proposedScheduleId})
+                      </strong>
+                      <span style={{ color: '#15803d', fontSize: 11 }}>
+                        Click any operation bar on the Gantt chart or click &quot;Edit&quot; in the table below to reassign machine or adjust timing.
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Button
+                      variant="outline"
+                      onClick={validateCurrentProposal}
+                      icon={<CheckCircle2 size={14} />}
+                    >
+                      Validate schedule
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={discardDraftProposal}
+                      icon={<Trash2 size={14} />}
+                    >
+                      Discard changes
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setIsEditMode(false)}
+                      icon={<X size={14} />}
+                    >
+                      Close editor
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Proposal Validation Notice */}
+              {proposalValidation && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    background: proposalValidation.valid ? '#f0fdf4' : '#fff5f5',
+                    border: `1px solid ${proposalValidation.valid ? '#bbf7d0' : '#fed7d7'}`,
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    display: 'flex',
+                    gap: 12,
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  {proposalValidation.valid ? (
+                    <CheckCircle2 size={18} style={{ color: '#16a34a', marginTop: 2, flexShrink: 0 }} />
+                  ) : (
+                    <AlertTriangle size={18} style={{ color: '#e53e3e', marginTop: 2, flexShrink: 0 }} />
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ color: proposalValidation.valid ? '#166534' : '#9b2c2c', fontSize: 13, display: 'block' }}>
+                      {proposalValidation.valid
+                        ? `Schedule Valid (${proposalValidation.checks_passed}/${proposalValidation.total_checks} Hard Constraints Passed)`
+                        : `Schedule Validation Warning (${proposalValidation.errors?.length || 0} Constraint Conflict${proposalValidation.errors?.length === 1 ? '' : 's'})`}
+                    </strong>
+                    {proposalValidation.errors && proposalValidation.errors.length > 0 && (
+                      <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: 11, color: '#9b2c2c', lineHeight: 1.5 }}>
+                        {proposalValidation.errors.map((err: string, i: number) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Gantt Timeline */}
               <div style={{ marginBottom: 16 }}>
                 <GanttTimeline
@@ -1057,10 +1160,11 @@ export function ReschedulingPage() {
                   machines={machines.slice(0, 5)}
                   downtimes={viewGanttMode === 'proposed' ? downtimes : []}
                   highlightChanges={viewGanttMode === 'proposed'}
+                  onSelect={(task) => setSelectedOperationForEdit(task)}
                 />
               </div>
 
-              {/* Changed Operations Table */}
+              {/* Operations Table */}
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -1068,10 +1172,13 @@ export function ReschedulingPage() {
                       <th>Machine</th>
                       <th>Order</th>
                       <th>Product</th>
+                      <th>Operation</th>
                       <th>Scheduled start</th>
                       <th>Completion</th>
+                      <th>Duration</th>
                       <th>Deadline</th>
                       <th>Priority</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1079,14 +1186,26 @@ export function ReschedulingPage() {
                       <tr key={task.id} className={task.status === 'Rescheduled' ? 'highlight-row' : ''}>
                         <td>
                           <strong>{task.machineId}</strong>
-                          {task.status === 'Rescheduled' && <span className="new-tag">REASSIGNED</span>}
+                          {task.status === 'Rescheduled' && <span className="new-tag">MODIFIED</span>}
                         </td>
                         <td className="mono">{task.orderId}</td>
                         <td>{task.product}</td>
+                        <td>{task.operationName || task.id}</td>
                         <td>{task.start}</td>
                         <td>{task.end}</td>
+                        <td>{task.duration ? `${task.duration.toFixed(1)}h` : '—'}</td>
                         <td>{shortDate(orders.find((order) => order.id === task.orderId)?.deadline ?? today)}</td>
                         <td><PriorityBadge value={orders.find((order) => order.id === task.orderId)?.priority ?? 'Medium'} /></td>
+                        <td style={{ textAlign: 'right' }}>
+                          <Button
+                            variant="outline"
+                            onClick={() => setSelectedOperationForEdit(task)}
+                            disabled={task.frozen || task.status === 'Completed'}
+                            icon={<Pencil size={12} />}
+                          >
+                            Edit
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1119,11 +1238,11 @@ export function ReschedulingPage() {
               </div>
 
               {/* Optimal / No Changes Notice */}
-              {!proposedHasChanges && currentState === 'F' && (
+              {!proposedHasChanges && currentState === 'F' && !isEditMode && (
                 <div className="impact-callout" style={{ marginBottom: 16 }}>
                   <CheckCircle2 size={16} />
                   <span>
-                    <strong>Schedule is already optimal.</strong> The CP-SAT solver confirmed no superior allocation exists under the active constraints. Approving will confirm the current active plan.
+                    <strong>Schedule is already optimal.</strong> The CP-SAT solver confirmed no superior allocation exists under the active constraints. Click &quot;Modify schedule&quot; to manually customize allocations.
                   </span>
                 </div>
               )}
@@ -1133,9 +1252,15 @@ export function ReschedulingPage() {
                 <div>
                   <strong>{proposedHasChanges ? 'Ready for your approval' : 'Confirm current schedule'}</strong>
                   <span>
-                    {proposedChangesCount > 0
-                      ? `${proposedChangesCount} operation${proposedChangesCount === 1 ? '' : 's'} will be moved. Approving updates the active production schedule across all modules.`
-                      : 'No operations were moved. Approving confirms the existing baseline plan as active.'}
+                    {proposalValidation && !proposalValidation.valid ? (
+                      <span style={{ color: '#dc2626', fontWeight: 600 }}>
+                        Approval disabled: Hard constraint conflicts must be resolved before approval.
+                      </span>
+                    ) : proposedChangesCount > 0 ? (
+                      `${proposedChangesCount} operation${proposedChangesCount === 1 ? '' : 's'} modified. Approving updates the active production schedule across all modules.`
+                    ) : (
+                      'No operations were moved. Approving confirms the existing baseline plan as active.'
+                    )}
                   </span>
                 </div>
                 <div className="approval-actions">
@@ -1147,13 +1272,19 @@ export function ReschedulingPage() {
                   </Button>
                   <Button
                     onClick={handleApprove}
-                    disabled={!hasProposal || approving || generating}
+                    disabled={isApprovalDisabled}
                     icon={approving ? <RefreshCw className="spin" size={15} /> : <CheckCircle2 size={15} />}
                   >
                     {approving ? 'Approving…' : proposedHasChanges ? 'Approve new schedule' : 'Confirm current schedule'}
                   </Button>
                 </div>
               </div>
+
+              {/* Operation Editor Modal */}
+              <OperationEditorModal
+                task={selectedOperationForEdit}
+                onClose={() => setSelectedOperationForEdit(null)}
+              />
             </>
           ) : (
             <EmptyState

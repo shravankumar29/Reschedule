@@ -340,6 +340,55 @@ export const api = {
   getImpact: () => request<BackendImpact>('/reschedule/impact'),
   getExplanations: () => request<BackendExplanation[]>('/reschedule/explanations'),
 
+  // Schedule manual editing & proposals
+  createDraftProposal: (baseScheduleId?: string) =>
+    request<RescheduleResult>('/schedule/proposals/draft', {
+      method: 'POST',
+      body: JSON.stringify({ base_schedule_id: baseScheduleId ?? null }),
+    }),
+  getEligibleMachinesForOp: (proposalId: string, operationId: string) =>
+    request<Array<{
+      machine_id: string
+      name: string
+      machine_type: string
+      available: boolean
+      utilization: number
+      current_task: string | null
+      is_compatible: boolean
+      incompatibility_reason: string | null
+    }>>(`/schedule/proposals/${proposalId}/eligible-machines/${operationId}`),
+  updateProposalOperation: (
+    proposalId: string,
+    operationId: string,
+    payload: { machine_id: string; start_time: number; end_time?: number }
+  ) =>
+    request<{
+      success: boolean
+      message: string
+      schedule_id: string
+      has_changes: boolean
+      changes_count: number
+      reassigned_count: number
+      delayed_count: number
+      unchanged_count: number
+      changed_operations: any[]
+      operation: any
+      operations: any[]
+      validation: any
+      impact?: BackendImpact
+    }>(`/schedule/proposals/${proposalId}/operations/${operationId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  discardProposal: (proposalId: string) =>
+    request<{ success: boolean; message: string }>(`/schedule/proposals/${proposalId}/discard`, {
+      method: 'DELETE',
+    }),
+  validateProposal: (proposalId: string) =>
+    request<any>(`/schedule/proposals/${proposalId}/validate`, {
+      method: 'POST',
+    }),
+
   // Analytics & Validation
   getAnalyticsOverview: (range = 'week', start?: string, end?: string) => {
     const params = new URLSearchParams({ range })

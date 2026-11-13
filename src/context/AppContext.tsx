@@ -33,6 +33,20 @@ interface AppContextValue {
   proposedUnchangedCount: number
   proposedError: string | null
   clearProposedError: () => void
+  isEditMode: boolean
+  setIsEditMode: (val: boolean) => void
+  selectedOperationForEdit: ScheduleTask | null
+  setSelectedOperationForEdit: (op: ScheduleTask | null) => void
+  proposalValidation: any | null
+  startManualEdit: () => Promise<void>
+  updateDraftOperation: (
+    operationId: string,
+    machineId: string,
+    startTime: number,
+    endTime?: number
+  ) => Promise<{ success: boolean; error?: string }>
+  discardDraftProposal: () => Promise<void>
+  validateCurrentProposal: () => Promise<any>
   disruptions: Disruption[]
   activeDisruption: Disruption | null
   settings: FactorySettings
@@ -165,6 +179,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [proposedDelayedCount, setProposedDelayedCount] = useState<number>(0)
   const [proposedUnchangedCount, setProposedUnchangedCount] = useState<number>(0)
   const [proposedError, setProposedError] = useState<string | null>(null)
+  const [isEditMode, setIsEditMode] = useState<boolean>(false)
+  const [selectedOperationForEdit, setSelectedOperationForEdit] = useState<ScheduleTask | null>(null)
+  const [proposalValidation, setProposalValidation] = useState<any | null>(null)
 
   const refreshAnalytics = async (range = analyticsRange) => {
     try {
@@ -682,6 +699,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProposedMode(null)
       setProposedSolverStatus(null)
       setProposedError(null)
+      setIsEditMode(false)
+      setSelectedOperationForEdit(null)
+      setProposalValidation(null)
 
       pushToast('New schedule approved', 'The optimized plan is now active across production views.')
       await refreshAnalytics()
@@ -722,6 +742,115 @@ export function AppProvider({ children }: { children: ReactNode }) {
     pushToast('Schedule recalculated', 'The recovery plan has been refreshed with current availability.', 'info')
   }
 
+  const startManualEdit = async () => {
+    setIsLoading(true)
+    clearProposedError()
+    try {
+      let activeProposalId = proposedScheduleId
+      if (!activeProposalId) {
+        const draft = await api.createDraftProposal()
+        activeProposalId = draft.schedule_id
+        setProposedScheduleId(draft.schedule_id)
+        setProposedMode('optimization')
+        setProposedSolverStatus(draft.solver_status || 'OPTIMAL')
+        setProposedHasChanges(false)
+        setProposedChangesCount(0)
+        setProposedReassignedCount(0)
+        setProposedDelayedCount(0)
+        setProposedUnchangedCount(draft.operations ? draft.operations.length : 0)
+        if (draft.operations && draft.operations.length > 0) {
+          const tasks = mapBackendOpsToTasks(draft.operations, orders)
+          setProposedSchedule(tasks)
+        }
+        if (draft.impact) setImpactData(draft.impact)
+        if (draft.validation) setProposalValidation(draft.validation)
+      } else {
+        const val = await api.validateProposal(activeProposalId).catch(() => null)
+        if (val) setProposalValidation(val)
+      }
+      setIsEditMode(true)
+      pushToast('Editor opened', 'Manual schedule editor is active. Select an operation to adjust machine and timing.', 'info')
+    } catch (err: any) {
+      console.warn('Could not start manual editor:', err)
+      const msg = err?.message || 'Could not initialize draft proposal'
+      pushToast('Editor error', msg, 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const updateDraftOperation = async (
+    operationId: string,
+    machineId: string,
+    startTime: number,
+    endTime?: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!proposedScheduleId) {
+      return { success: false, error: 'No active proposal found.' }
+    }
+    setIsLoading(true)
+    try {
+      const res = await api.updateProposalOperation(proposedScheduleId, operationId, {
+        machine_id: machineId,
+        start_time: startTime,
+        end_time: endTime,
+      })
+      if (res.success && res.operations) {
+        const tasks = mapBackendOpsToTasks(res.operations, orders)
+        setProposedSchedule(tasks)
+        setProposedHasChanges(res.has_changes ?? true)
+        setProposedChangesCount(res.changes_count ?? 1)
+        setProposedReassignedCount(res.reassigned_count ?? 0)
+        setProposedDelayedCount(res.delayed_count ?? 0)
+        setProposedUnchangedCount(res.unchanged_count ?? 0)
+        setProposedChangedOps(res.changed_operations ?? [])
+        if (res.impact) setImpactData(res.impact)
+        if (res.validation) setProposalValidation(res.validation)
+        pushToast('Operation updated', res.message, 'success')
+        setSelectedOperationForEdit(null)
+        await refreshAnalytics()
+        return { success: true }
+      }
+      return { success: false, error: res.message || 'Update failed' }
+    } catch (err: any) {
+      const msg = err?.message || 'Validation error'
+      pushToast('Update rejected', msg, 'error')
+      return { success: false, error: msg }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const discardDraftProposal = async () => {
+    if (proposedScheduleId) {
+      try {
+        await api.discardProposal(proposedScheduleId).catch(() => null)
+      } catch {}
+    }
+    clearProposedError()
+    setIsEditMode(false)
+    setSelectedOperationForEdit(null)
+    setProposalValidation(null)
+    pushToast('Changes discarded', 'Manual edits have been discarded without affecting baseline.', 'info')
+  }
+
+  const validateCurrentProposal = async () => {
+    if (!proposedScheduleId) return null
+    try {
+      const val = await api.validateProposal(proposedScheduleId)
+      setProposalValidation(val)
+      if (val.valid) {
+        pushToast('Validation passed', 'All 7 hard constraints are satisfied.', 'success')
+      } else {
+        pushToast('Validation warning', `${val.errors.length} constraint conflicts detected.`, 'error')
+      }
+      return val
+    } catch (err: any) {
+      pushToast('Validation failed', err?.message || 'Could not validate schedule', 'error')
+      return null
+    }
+  }
+
   const resetDemoData = async () => {
     setIsLoading(true)
     try {
@@ -756,6 +885,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     proposedUnchangedCount,
     proposedError,
     clearProposedError,
+    isEditMode,
+    setIsEditMode,
+    selectedOperationForEdit,
+    setSelectedOperationForEdit,
+    proposalValidation,
+    startManualEdit,
+    updateDraftOperation,
+    discardDraftProposal,
+    validateCurrentProposal,
     disruptions,
     activeDisruption: disruptions.find((item) => item.status !== 'Resolved') ?? disruptions[0] ?? null,
     settings,

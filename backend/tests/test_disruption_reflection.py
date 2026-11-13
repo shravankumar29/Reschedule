@@ -52,15 +52,20 @@ def test_disruptions_reflected_in_generated_schedule():
         for op in cnc1_initial_ops:
             print(f"  - {op['operation_id']} ({op['job_id']}): {op['start_time']}h - {op['end_time']}h")
 
-        # 5. Report a CNC-1 breakdown from 08:00 AM to 11:00 AM (3 hours duration)
-        # Shift start is 06:00 AM. 08:00 is 2.0h into shift. 11:00 is 5.0h into shift.
+        target_op = cnc1_initial_ops[0]
+        target_clock_hour = int(6 + target_op["start_time"])
+        target_start_str = f"{target_clock_hour:02d}:00"
+        downtime_start_h = target_op["start_time"]
+        downtime_end_h = downtime_start_h + 3.0
+
+        # 5. Report a CNC-1 breakdown overlapping target operation
         breakdown_payload = DisruptionCreate(
             disruption_type="Machine Breakdown",
             resource="CNC-1",
             severity="Critical",
-            description="CNC-1 spindle motor breakdown from 08:00 AM to 11:00 AM",
+            description=f"CNC-1 spindle motor breakdown from {target_start_str}",
             affected_job_ids=["J-101", "J-102"],
-            breakdown_start="08:00",
+            breakdown_start=target_start_str,
             estimated_repair_hours=3.0,
         )
         created_disruption = create_disruption(payload=breakdown_payload, db=db)
@@ -72,7 +77,7 @@ def test_disruptions_reflected_in_generated_schedule():
         saved_d = db.query(Disruption).filter(Disruption.disruption_id == created_disruption.disruption_id).first()
         assert saved_d is not None
         assert saved_d.status in ("Open", "Analyzed")
-        assert saved_d.breakdown_start == "08:00"
+        assert saved_d.breakdown_start == target_start_str
         assert saved_d.estimated_repair_hours == 3.0
 
         # Verify CNC-1 machine maintenance periods updated
@@ -89,10 +94,7 @@ def test_disruptions_reflected_in_generated_schedule():
         # 7b. Approve the proposed schedule so it becomes active (impact requires active schedule)
         approve_schedule(payload=ScheduleApproveRequest(schedule_id=revised_id), db=db)
 
-        # 8. VERIFY NO OPERATION ON CNC-1 OVERLAPS THE BREAKDOWN WINDOW (08:00 AM to 11:00 AM)
-        # In hours from shift start: 08:00 AM is 2.0h, 11:00 AM is 5.0h
-        downtime_start_h = 2.0
-        downtime_end_h = 5.0
+        # 8. VERIFY NO OPERATION ON CNC-1 OVERLAPS THE BREAKDOWN WINDOW
 
         revised_ops = resched_result["operations"]
         cnc1_revised_ops = [op for op in revised_ops if op["machine_id"] == "CNC-1"]

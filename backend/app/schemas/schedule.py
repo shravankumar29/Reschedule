@@ -16,6 +16,43 @@ class ScheduleApproveRequest(BaseModel):
     schedule_id: str
 
 
+class DraftProposalRequest(BaseModel):
+    base_schedule_id: Optional[str] = None
+
+
+class OperationUpdateRequest(BaseModel):
+    machine_id: str
+    start_time: float
+    end_time: Optional[float] = None
+
+
+class EligibleMachineRead(BaseModel):
+    machine_id: str
+    name: str
+    machine_type: str
+    available: bool
+    utilization: int
+    current_task: Optional[str] = None
+    is_compatible: bool = True
+    incompatibility_reason: Optional[str] = None
+
+
+class ProposalOperationEditResult(BaseModel):
+    success: bool
+    message: str
+    schedule_id: str
+    operation: ScheduleOperationRead
+    validation: Dict[str, Any]
+    impact: Optional[Dict[str, Any]] = None
+    has_changes: bool = True
+    changes_count: int = 1
+    reassigned_count: int = 0
+    delayed_count: int = 0
+    unchanged_count: int = 0
+    changed_operations: List[Dict[str, Any]] = []
+    operations: List[ScheduleOperationRead] = []
+
+
 class ScheduleOperationRead(BaseModel):
     id: int
     schedule_id: str
