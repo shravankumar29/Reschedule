@@ -1,0 +1,17 @@
+{
+  "routes": [
+    { "path": "/", "title": "ReSchedule · Production Intelligence" },
+    { "path": "/login", "title": "Sign in · ReSchedule" },
+    { "path": "/dashboard", "title": "Production Overview · ReSchedule" },
+    { "path": "/overview", "title": "Production Overview · ReSchedule" },
+    { "path": "/schedule", "title": "Production Schedule · ReSchedule" },
+    { "path": "/orders", "title": "Order Management · ReSchedule" },
+    { "path": "/machines", "title": "Machine Management · ReSchedule" },
+    { "path": "/disruptions", "title": "Disruption Center · ReSchedule" },
+    { "path": "/rescheduling", "title": "Smart Rescheduling · ReSchedule" },
+    { "path": "/comparison", "title": "Schedule Comparison · ReSchedule" },
+    { "path": "/analytics", "title": "Production Analytics · ReSchedule" },
+    { "path": "/reports", "title": "Production Reports · ReSchedule" },
+    { "path": "/settings", "title": "Factory Settings · ReSchedule" }
+  ]
+}
