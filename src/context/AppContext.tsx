@@ -73,6 +73,7 @@ interface AppContextValue {
   addMachine: (machine: Omit<Machine, 'utilization' | 'task'>) => void
   updateMachine: (machine: Machine) => void
   updateMachineStatus: (id: string, status: Machine['status']) => void
+  deleteMachine: (id: string) => Promise<void>
   reportDisruption: (input: Omit<Disruption, 'id' | 'reported' | 'status'> & { breakdown_start?: string; estimated_repair_hours?: number }) => void
   analyzeDisruption: (id?: string) => void
   generateSchedule: () => Promise<void>
@@ -735,8 +736,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     pushToast('Machine updated', `${machine.id} configuration is saved.`)
   }
 
-  const updateMachineStatus = async (id: string, status: Machine['status']) => {
-    setMachines((current) =>
+  const updateMachineStatus = async (id: string, status: Machine['status']) => {    setMachines((current) =>
       current.map((machine) =>
         machine.id === id ? { ...machine, status, task: status === 'Available' ? 'Available for assignment' : machine.task } : machine,
       ),
@@ -745,6 +745,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await api.setMachineAvailability(id, status !== 'Breakdown' && status !== 'Under Maintenance')
     } catch { /* fallback */ }
     if (status === 'Available') pushToast('Machine released', `${id} is now available for assignment.`)
+  }
+
+  const deleteMachine = async (id: string) => {
+    await api.deleteMachine(id)
+    setMachines((current) => current.filter((m) => m.id !== id))
+    pushToast('Machine removed', `${id} has been removed from the factory.`, 'warning')
+    refreshAnalytics()
   }
 
   const reportDisruption = async (input: Omit<Disruption, 'id' | 'reported' | 'status'> & { breakdown_start?: string; estimated_repair_hours?: number }) => {
@@ -1187,6 +1194,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addMachine,
     updateMachine,
     updateMachineStatus,
+    deleteMachine,
     reportDisruption,
     analyzeDisruption,
     generateSchedule,

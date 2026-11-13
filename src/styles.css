@@ -1105,3 +1105,14 @@ html { scroll-behavior: smooth; }
 .clickable-row:hover {
   background-color: #f7faf8 !important;
 }
+
+/* Machine card remove button */
+.machine-remove-btn {
+  color: var(--muted) !important;
+  transition: color 0.15s ease;
+  cursor: pointer;
+}
+
+.machine-remove-btn:hover {
+  color: var(--brick) !important;
+}

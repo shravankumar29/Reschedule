@@ -21,6 +21,10 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "puppeteer": "^25.17.0",
     "typescript": "latest"
+  },
+  "allowScripts": {
+    "puppeteer@25.17.0": true
   }
 }

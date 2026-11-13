@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.machine import Machine
+from ..models.schedule import Schedule, ScheduleOperation
 from ..schemas.machine import MachineCreate, MachineRead, MachineUpdate
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -51,6 +52,23 @@ def delete_machine(machine_id: str, db: Session = Depends(get_db)):
     m = db.query(Machine).filter(Machine.machine_id == machine_id).first()
     if not m:
         raise HTTPException(404, "Machine not found")
+    # Block deletion if there are active (non-completed) operations assigned to this machine in an active schedule
+    active_ops = (
+        db.query(ScheduleOperation)
+        .join(Schedule, ScheduleOperation.schedule_id == Schedule.schedule_id)
+        .filter(
+            ScheduleOperation.machine_id == machine_id,
+            Schedule.status == "active",
+            ScheduleOperation.status.notin_(["Completed", "Cancelled"]),
+        )
+        .count()
+    )
+    if active_ops > 0:
+        raise HTTPException(
+            409,
+            f"Cannot remove machine {machine_id}: it has {active_ops} active scheduled "
+            "operation(s). Complete or reassign them first.",
+        )
     db.delete(m)
     db.commit()
 
